@@ -1,0 +1,25 @@
+# Copia este archivo como terraform.tfvars y completa los valores
+
+aws_region   = "us-east-1"
+project_name = "datalake"
+environment  = "dev"
+
+# Red
+vpc_id                 = "vpc-xxxxxxxx"
+subnet_ids             = ["subnet-aaaa", "subnet-bbbb", "subnet-cccc"]
+redshift_allowed_cidrs = ["10.0.0.0/8"]
+
+# Redshift
+redshift_db_name        = "datalake"
+redshift_admin_username = "admin"
+redshift_admin_password = "CambiaEstaPassword123!"
+redshift_base_capacity  = 32
+
+# Kafka (MSK)
+msk_broker_nodes    = 3
+msk_instance_type   = "kafka.m5.large"
+msk_ebs_volume_size = 100
+
+# Sandbox (poner true para habilitar ambiente de pruebas)
+enable_sandbox             = false
+sandbox_athena_scan_limit  = 104857600  # 100 MB

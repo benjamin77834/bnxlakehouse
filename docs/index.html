@@ -1,0 +1,1317 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Lake AWS - Arquitectura y Costos</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f172a;
+            color: #e2e8f0;
+            line-height: 1.6;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        header {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-bottom: 1px solid #334155;
+        }
+        header h1 { font-size: 2.2rem; color: #38bdf8; margin-bottom: 8px; }
+        header p { color: #94a3b8; font-size: 1.1rem; }
+</style>
+</head>
+<body>
+<header>
+    <h1>🏗️ Data Lake AWS - Arquitectura</h1>
+    <p>Visualización de infraestructura, flujo de datos y costos estimados</p>
+</header>
+<div class="container">
+    <nav class="tabs" id="tabs">
+        <button class="tab active" data-tab="architecture">Arquitectura</button>
+        <button class="tab" data-tab="flow">Flujo de Datos</button>
+        <button class="tab" data-tab="iam">Roles IAM</button>
+        <button class="tab" data-tab="costs">Costos Resumen</button>
+        <button class="tab" data-tab="costs-detail">Costos Detalle</button>
+        <button class="tab" data-tab="terraform">Terraform</button>
+    </nav>
+
+    <!-- TAB: Arquitectura -->
+    <section id="architecture" class="tab-content active">
+        <h2>Diagrama de Arquitectura General <button class="fullscreen-btn" onclick="openFullscreen('arch-mermaid')">⛶ Ver completo</button></h2>
+        <div class="mermaid" id="arch-mermaid">
+graph LR
+    subgraph Sources["Fuentes"]
+        SRC1["APIs"]
+        SRC2["BDs"]
+        SRC3["IoT"]
+        SRC4["Batch/SFTP"]
+        SRC5["Eventos"]
+    end
+
+    subgraph Ingestion["Ingesta"]
+        API["API GW + Lambda"]
+        EKS["EKS"]
+        LANDING["S3 Landing"]
+        MSK["MSK Kafka"]
+    end
+
+    subgraph Lakehouse["Data Lakehouse"]
+        BRONZE["S3 Bronze"]
+        SILVER["S3 Silver"]
+        GOLD["S3 Gold"]
+        GLUE["Glue ETL + Crawlers"]
+        CATALOG["Glue Catalog"]
+        ATHENA["Athena"]
+    end
+
+    subgraph Warehouse["Warehouse"]
+        REDSHIFT["Redshift"]
+    end
+
+    subgraph AI["IA Generativa / ML"]
+        SM["SageMaker Studio + Training + Endpoints"]
+        BR["Bedrock FM + KB + Agents"]
+    end
+
+    subgraph Serving["Salida"]
+        APOUT["API GW + Lambdas"]
+        APPS["Consumidores"]
+    end
+
+    subgraph Observability["Observabilidad"]
+        CW["CloudWatch Dashboards + Alarmas"]
+        SNS["SNS Alertas"]
+    end
+
+    SRC1 & SRC3 --> API
+    SRC5 --> MSK
+    SRC2 --> EKS
+    SRC4 --> LANDING
+    API & MSK & EKS --> BRONZE
+    LANDING --> BRONZE
+    BRONZE --> GLUE --> SILVER
+    SILVER --> GLUE --> GOLD
+    GLUE --> CATALOG
+    CATALOG --> ATHENA & REDSHIFT
+    GOLD --> ATHENA & REDSHIFT & SM & BR
+    SM --> APOUT
+    BR --> APOUT
+    ATHENA --> APOUT
+    APOUT --> APPS
+    GLUE & SM & BR & APOUT & MSK --> CW
+    CW --> SNS
+        </div>
+
+        <h3>Descripcion de cada capa</h3>
+        <div class="spec-grid">
+            <div class="spec-card">
+                <h4>1. Fuentes Externas</h4>
+                <p>Origenes de datos que alimentan la plataforma. Pueden ser APIs REST de terceros, bases de datos transaccionales (MySQL, PostgreSQL, Oracle), dispositivos IoT que envian telemetria, archivos planos que se depositan via SFTP, o sistemas que emiten eventos en tiempo real.</p>
+            </div>
+            <div class="spec-card">
+                <h4>2. Ingesta</h4>
+                <p><strong>API Gateway + Lambda:</strong> Reciben datos en linea (APIs, webhooks, IoT) y los escriben directamente en Bronze.<br>
+                <strong>MSK Kafka:</strong> Bus de eventos para streaming de alta velocidad. Productores publican eventos y consumidores (Lambda, EKS) los procesan en tiempo real.<br>
+                <strong>EKS:</strong> Jobs de extraccion pesados (replicacion de BDs, ETL custom con Spark).<br>
+                <strong>S3 Landing:</strong> Punto de aterrizaje exclusivo para cargas batch u offline (archivos CSV, Parquet, JSON que llegan por SFTP o upload manual). Lambda los valida y mueve a Bronze.</p>
+            </div>
+            <div class="spec-card">
+                <h4>3. Data Lakehouse (Bronze / Silver / Gold)</h4>
+                <p><strong>Bronze (Raw):</strong> Datos tal cual llegan, sin modificar. Se organizan por fecha (year/month/day). Sirven como fuente de verdad inmutable.<br>
+                <strong>Silver (Curated):</strong> Datos limpios y estandarizados. Se aplican reglas de calidad, deduplicacion, tipado correcto y joins entre fuentes. Formato Parquet particionado.<br>
+                <strong>Gold (Augmented):</strong> Datos enriquecidos y agregados, listos para consumo directo. Tablas de hechos y dimensiones, KPIs precalculados, features para ML.<br>
+                <strong>Glue ETL Jobs:</strong> Transformaciones Spark/Python que mueven datos entre capas.<br>
+                <strong>Glue Crawlers:</strong> Descubren automaticamente los schemas de los archivos en S3 y los registran en el catalogo.<br>
+                <strong>Glue Data Catalog:</strong> Repositorio central de metadatos. Define tablas, columnas, tipos y particiones. Lo consultan Athena, Redshift Spectrum y SageMaker.<br>
+                <strong>Amazon Athena:</strong> Motor SQL serverless para consultas ad-hoc directamente sobre S3. Paga solo por datos escaneados.</p>
+            </div>
+            <div class="spec-card">
+                <h4>4. Data Warehouse</h4>
+                <p><strong>Redshift Serverless:</strong> Almacen de datos columnar optimizado para consultas analiticas complejas, dashboards de BI y reportes ejecutivos. Soporta SQL estandar, se conecta a herramientas como Tableau, Power BI, QuickSight. Consume datos Gold via COPY o Spectrum (consultas federadas sobre S3).</p>
+            </div>
+            <div class="spec-card">
+                <h4>5. IA Generativa / Machine Learning</h4>
+                <p><strong>SageMaker Studio Unified:</strong> Entorno de desarrollo para data scientists. Notebooks Jupyter, experimentos de ML, exploracion visual de datos, MLflow integrado.<br>
+                <strong>SageMaker Training:</strong> Infraestructura gestionada para entrenar modelos a escala (CPU o GPU). Soporta TensorFlow, PyTorch, XGBoost, y custom containers.<br>
+                <strong>SageMaker Endpoints:</strong> Modelos desplegados para inferencia en tiempo real con auto-scaling. Sirven predicciones via API.<br>
+                <strong>Bedrock - Modelos Fundacionales:</strong> Acceso a Claude (Anthropic), Titan (Amazon), Llama (Meta), Mistral para tareas de NLP, generacion de texto, resumen, clasificacion.<br>
+                <strong>Bedrock Knowledge Bases (RAG):</strong> Indexa documentos de Gold en un vector store y permite hacer preguntas con contexto. El modelo busca informacion relevante antes de responder.<br>
+                <strong>Bedrock Agents:</strong> Orquestadores que combinan modelos fundacionales + herramientas (APIs, bases de datos) para ejecutar tareas complejas de forma autonoma.</p>
+            </div>
+            <div class="spec-card">
+                <h4>6. Capa de Salida / Serving</h4>
+                <p><strong>API Gateway REST:</strong> Punto unico de entrada para consumidores. Expone endpoints seguros con autenticacion, rate limiting y caching.<br>
+                <strong>Lambda Serving Gold:</strong> Funcion que consulta datos Gold (via Athena o S3 directo) y los devuelve formateados al consumidor.<br>
+                <strong>Lambda Serving ML:</strong> Proxy que envia requests a SageMaker Endpoints o Bedrock y devuelve predicciones/respuestas generadas.<br>
+                <strong>Consumidores:</strong> Aplicaciones web, moviles, dashboards de BI, microservicios, otros sistemas que consumen datos y predicciones del data lake.</p>
+            </div>
+            <div class="spec-card">
+                <h4>7. Observabilidad</h4>
+                <p><strong>CloudWatch Dashboards (6 tableros):</strong><br>
+                - General: Vista ejecutiva de salud del data lake (S3, Lambda errores, Redshift queries).<br>
+                - Ingesta: Landing processor, MSK Kafka throughput y consumer lag.<br>
+                - ETL: Glue jobs duracion, bytes procesados, crawlers, tablas en catalogo.<br>
+                - Analitica: Athena datos escaneados y tiempos, Redshift RPUs y conexiones.<br>
+                - IA/ML: SageMaker invocaciones y latencia, Bedrock tokens y modelos.<br>
+                - Serving: API Gateway requests, latencia p99, errores 4xx/5xx.<br><br>
+                <strong>Alarmas criticas (SNS):</strong> Lambda errores >5 en 10min, Glue jobs fallidos, Redshift >80% capacidad, API 5xx >10 en 10min, MSK disco >80%.<br>
+                <strong>Logs centralizados:</strong> Todos los Lambda, Glue jobs y MSK con retención de 30 dias.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: Flujo de Datos -->
+    <section id="flow" class="tab-content">
+        <h2>Flujo de Datos End-to-End</h2>
+        <div class="mermaid">
+flowchart LR
+    subgraph Sources["1. Fuentes"]
+        A1["APIs Externas"]
+        A2["Bases de Datos"]
+        A3["IoT / Streaming"]
+        A4["Archivos Manuales"]
+    end
+
+    subgraph Ingest["2. Ingesta"]
+        B1["API Gateway"]
+        B2["Lambda"]
+        B3["EKS Jobs"]
+    end
+
+    subgraph Landing["3. Landing Zone"]
+        C0["S3 Landing - Datos sin validar"]
+    end
+
+    subgraph Validate["4. Validacion"]
+        V1["Lambda Processor - Valida y copia a Bronze"]
+    end
+
+    subgraph Lake["5. Data Lake - Medallion"]
+        C1["S3 Bronze - Raw - year/month/day"]
+        C2["S3 Silver - Curated - Limpio"]
+        C3["S3 Gold - Augmented - Enriquecido"]
+    end
+
+    subgraph ETL["6. ETL"]
+        D1["Glue Crawlers"]
+        D2["Glue ETL Jobs"]
+        D3["Glue Data Catalog"]
+    end
+
+    subgraph Consume["7. Consumo"]
+        E1["Athena - SQL"]
+        E2["Redshift - DW"]
+        E3["SageMaker - ML"]
+        E4["Bedrock - GenAI"]
+        E5["API Gateway - APIs"]
+    end
+
+    A1 --> B1
+    A3 --> B1
+    B1 --> B2
+    A2 --> B3
+    A4 --> C0
+    B2 --> C0
+    B3 --> C0
+    C0 --> V1
+    V1 --> C1
+    V1 --> D1
+    C1 --> D1
+    D1 --> D3
+    C1 --> D2
+    D2 --> C2
+    C2 --> D2
+    D2 --> C3
+    D3 --> E1
+    D3 --> E2
+    C3 --> E1
+    C3 --> E2
+    C3 --> E3
+    C3 --> E4
+    E1 --> E5
+    E2 --> E5
+        </div>
+
+        <h3 style="margin-top:20px;">Ciclo de vida del dato</h3>
+        <div class="mermaid">
+stateDiagram-v2
+    [*] --> Landing : Dato llega
+    Landing --> Bronze : Lambda valida y copia
+    Landing --> Glacier : 30 dias sin procesar
+    Bronze --> Silver : Glue ETL limpia y cura
+    Silver --> Gold : Glue ETL enriquece y agrega
+    Gold --> Athena : Query SQL
+    Gold --> Redshift : COPY o Spectrum
+    Gold --> SageMaker : Training
+    Gold --> Bedrock : RAG
+    Glacier --> [*] : Expira 365 dias
+        </div>
+    </section>
+
+    <!-- TAB: Roles IAM -->
+    <section id="iam" class="tab-content">
+        <h2>Mapa de Roles y Permisos IAM</h2>
+        <div class="mermaid">
+graph TD
+    subgraph DataLake["iam.tf - Roles Data Lake"]
+        R1["<b>glue_role</b><br/>Service: glue.amazonaws.com"]
+        R2["<b>redshift_role</b><br/>Service: redshift.amazonaws.com"]
+        R3["<b>athena_role</b><br/>Principal: Account Root"]
+    end
+
+    subgraph Compute["iam_compute.tf - Roles Compute"]
+        R4["<b>lambda_role</b><br/>Service: lambda.amazonaws.com"]
+        R5["<b>apigw_role</b><br/>Service: apigateway.amazonaws.com"]
+        R6["<b>eks_cluster_role</b><br/>Service: eks.amazonaws.com"]
+        R7["<b>eks_node_role</b><br/>Service: ec2.amazonaws.com"]
+    end
+
+    subgraph AIML["iam_ai.tf - Roles AI/ML"]
+        R8["<b>sagemaker_role</b><br/>Service: sagemaker.amazonaws.com"]
+        R9["<b>bedrock_role</b><br/>Principal: Account Root"]
+    end
+        </div>
+
+        <h3>Detalle de permisos por rol</h3>
+        <div class="iam-detail-grid">
+            <div class="iam-card">
+                <h4>🔄 glue_role</h4>
+                <ul>
+                    <li><span class="policy-managed">AWSGlueServiceRole</span></li>
+                    <li>s3:Get/Put/DeleteObject → landing, bronze, silver, gold</li>
+                    <li>s3:ListBucket → todos los buckets</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>📊 redshift_role</h4>
+                <ul>
+                    <li>s3:GetObject, PutObject, ListBucket → bronze, silver, gold</li>
+                    <li>glue:GetDatabase/Tables/Partitions → * (Spectrum)</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🔍 athena_role</h4>
+                <ul>
+                    <li>athena:Start/Stop/GetQueryExecution → workgroup</li>
+                    <li>s3:GetObject, ListBucket → bronze, silver, gold (lectura)</li>
+                    <li>s3:Get/PutObject → athena-results (escritura)</li>
+                    <li>glue:GetDatabase/Tables/Partitions → * (catálogo)</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>⚡ lambda_role</h4>
+                <ul>
+                    <li><span class="policy-managed">AWSLambdaBasicExecutionRole</span></li>
+                    <li>s3:Get/Put/DeleteObject → landing, bronze, silver, gold</li>
+                    <li>glue:StartCrawler, StartJobRun, GetJob/Crawler → *</li>
+                    <li>athena:StartQueryExecution, GetQuery* → workgroup</li>
+                    <li>sqs:Send/Receive/DeleteMessage → project queues</li>
+                    <li>sns:Publish → project topics</li>
+                    <li>ec2:Create/Describe/DeleteNetworkInterface → * (VPC)</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🌐 apigw_role</h4>
+                <ul>
+                    <li>logs:Create/Describe/Put/Get/Filter → * (CloudWatch)</li>
+                    <li>lambda:InvokeFunction → project-* functions</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>☸️ eks_cluster_role</h4>
+                <ul>
+                    <li><span class="policy-managed">AmazonEKSClusterPolicy</span></li>
+                    <li><span class="policy-managed">AmazonEKSVPCResourceController</span></li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>☸️ eks_node_role</h4>
+                <ul>
+                    <li><span class="policy-managed">AmazonEKSWorkerNodePolicy</span></li>
+                    <li><span class="policy-managed">AmazonEKS_CNI_Policy</span></li>
+                    <li><span class="policy-managed">AmazonEC2ContainerRegistryReadOnly</span></li>
+                    <li>s3:GetObject, ListBucket → bronze, silver, gold</li>
+                    <li>glue:GetDatabase/Tables/Partitions → *</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🧠 sagemaker_role</h4>
+                <ul>
+                    <li><span class="policy-managed">AmazonSageMakerFullAccess</span></li>
+                    <li>s3:Get/Put/DeleteObject → bronze, silver, gold, artifacts</li>
+                    <li>glue:GetDatabase/Tables/Partitions, SearchTables → *</li>
+                    <li>ecr:Get/BatchGet/Create/Put/Upload → *</li>
+                    <li>iam:PassRole → self (sagemaker.amazonaws.com)</li>
+                    <li>logs:Create/Put/Describe → /aws/sagemaker/*</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🤖 bedrock_role</h4>
+                <ul>
+                    <li>bedrock:InvokeModel, InvokeModelWithResponseStream → *</li>
+                    <li>bedrock:Create/Get/List/Delete KnowledgeBase → *</li>
+                    <li>bedrock:Create/Get/List/Delete/Update/Invoke Agent → *</li>
+                    <li>bedrock:Create/Get/List/Stop/Delete CustomModel → *</li>
+                    <li>s3:Get/PutObject, ListBucket → gold, artifacts</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: Costos -->
+    <section id="costs" class="tab-content">
+        <h2>Calculadora de Costos Mensuales (USD)</h2>
+        <p style="color:#94a3b8; margin-bottom:20px;">Ajusta los valores para estimar tu costo mensual. Los precios se calculan automaticamente.</p>
+
+        <div class="calc-grid">
+            <div class="calc-card">
+                <div class="calc-icon">💾</div>
+                <h3>S3 Storage</h3>
+                <label>Volumen total (GB):</label>
+                <input type="number" id="s3_gb" value="1000" min="1" onchange="calcCosts()">
+                <p class="calc-rate">$0.023/GB/mes</p>
+                <p class="calc-result" id="s3_cost">$23.00</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">⚙️</div>
+                <h3>Glue ETL</h3>
+                <label>Jobs por dia:</label>
+                <input type="number" id="glue_jobs" value="3" min="0" onchange="calcCosts()">
+                <label>DPUs por job:</label>
+                <input type="number" id="glue_dpus" value="5" min="2" onchange="calcCosts()">
+                <label>Duracion (min):</label>
+                <input type="number" id="glue_min" value="30" min="1" onchange="calcCosts()">
+                <p class="calc-rate">$0.44/DPU-hora</p>
+                <p class="calc-result" id="glue_cost">$33.00</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">🔍</div>
+                <h3>Athena</h3>
+                <label>Queries por dia:</label>
+                <input type="number" id="athena_queries" value="50" min="0" onchange="calcCosts()">
+                <label>GB por query:</label>
+                <input type="number" id="athena_gb" value="5" min="0.01" step="0.1" onchange="calcCosts()">
+                <p class="calc-rate">$5.00/TB escaneado</p>
+                <p class="calc-result" id="athena_cost">$37.50</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">📊</div>
+                <h3>Redshift Serverless</h3>
+                <label>RPUs:</label>
+                <input type="number" id="rs_rpus" value="32" min="4" step="4" onchange="calcCosts()">
+                <label>Horas activo por dia:</label>
+                <input type="number" id="rs_hours" value="6" min="0" max="24" onchange="calcCosts()">
+                <p class="calc-rate">$0.375/RPU-hora</p>
+                <p class="calc-result" id="rs_cost">$2,160.00</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">⚡</div>
+                <h3>Lambda</h3>
+                <label>Invocaciones/mes (millones):</label>
+                <input type="number" id="lambda_millions" value="10" min="0" step="1" onchange="calcCosts()">
+                <label>Memoria (MB):</label>
+                <input type="number" id="lambda_mb" value="256" min="128" step="64" onchange="calcCosts()">
+                <label>Duracion (ms):</label>
+                <input type="number" id="lambda_ms" value="500" min="1" onchange="calcCosts()">
+                <p class="calc-rate">$0.20/1M req + $0.0000166667/GB-s</p>
+                <p class="calc-result" id="lambda_cost">$23.33</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">🌐</div>
+                <h3>API Gateway</h3>
+                <label>Requests/mes (millones):</label>
+                <input type="number" id="apigw_millions" value="10" min="0" step="1" onchange="calcCosts()">
+                <p class="calc-rate">$1.00/1M (HTTP API)</p>
+                <p class="calc-result" id="apigw_cost">$10.00</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">☸️</div>
+                <h3>EKS</h3>
+                <label>Nodos:</label>
+                <input type="number" id="eks_nodes" value="3" min="0" onchange="calcCosts()">
+                <label>Tipo de nodo:</label>
+                <select id="eks_type" onchange="calcCosts()">
+                    <option value="0.0416">t3.medium ($0.0416/hr)</option>
+                    <option value="0.096" selected>m5.large ($0.096/hr)</option>
+                    <option value="0.192">m5.xlarge ($0.192/hr)</option>
+                    <option value="0.384">m5.2xlarge ($0.384/hr)</option>
+                </select>
+                <p class="calc-rate">+ $0.10/hr cluster</p>
+                <p class="calc-result" id="eks_cost">$352.08</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">🧠</div>
+                <h3>SageMaker</h3>
+                <label>Notebooks (hrs/dia laborable):</label>
+                <input type="number" id="sm_nb_hours" value="8" min="0" max="24" onchange="calcCosts()">
+                <label>Endpoints 24/7:</label>
+                <input type="number" id="sm_endpoints" value="1" min="0" onchange="calcCosts()">
+                <label>Tipo endpoint:</label>
+                <select id="sm_ep_type" onchange="calcCosts()">
+                    <option value="0.134" selected>ml.m5.large ($0.134/hr)</option>
+                    <option value="0.269">ml.m5.xlarge ($0.269/hr)</option>
+                    <option value="4.284">ml.p3.2xlarge GPU ($4.284/hr)</option>
+                </select>
+                <p class="calc-rate">Notebook: $0.05/hr</p>
+                <p class="calc-result" id="sm_cost">$105.48</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">🤖</div>
+                <h3>Bedrock</h3>
+                <label>Tokens/dia (millones):</label>
+                <input type="number" id="bedrock_millions" value="5" min="0" step="0.5" onchange="calcCosts()">
+                <label>Modelo:</label>
+                <select id="bedrock_model" onchange="calcCosts()">
+                    <option value="0.00025">Claude 3 Haiku ($0.00025/1K)</option>
+                    <option value="0.003" selected>Claude 3.5 Sonnet ($0.003/1K)</option>
+                    <option value="0.015">Claude 3 Opus ($0.015/1K)</option>
+                    <option value="0.0003">Titan Lite ($0.0003/1K)</option>
+                    <option value="0.0003">Llama 3 8B ($0.0003/1K)</option>
+                </select>
+                <p class="calc-rate">Precio input tokens (output ~5x mas)</p>
+                <p class="calc-result" id="bedrock_cost">$1,350.00</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">📨</div>
+                <h3>MSK (Kafka)</h3>
+                <label>Brokers:</label>
+                <input type="number" id="msk_brokers" value="3" min="2" onchange="calcCosts()">
+                <label>Tipo:</label>
+                <select id="msk_type" onchange="calcCosts()">
+                    <option value="0.21" selected>kafka.m5.large ($0.21/hr)</option>
+                    <option value="0.42">kafka.m5.xlarge ($0.42/hr)</option>
+                    <option value="0.096">kafka.t3.small ($0.096/hr)</option>
+                </select>
+                <label>Storage por broker (GB):</label>
+                <input type="number" id="msk_storage" value="100" min="1" onchange="calcCosts()">
+                <p class="calc-rate">+ $0.10/GB/mes storage</p>
+                <p class="calc-result" id="msk_cost">$483.60</p>
+            </div>
+            <div class="calc-card">
+                <div class="calc-icon">📡</div>
+                <h3>Observabilidad</h3>
+                <label>Dashboards:</label>
+                <input type="number" id="cw_dashboards" value="6" min="0" onchange="calcCosts()">
+                <label>Logs ingesta (GB/mes):</label>
+                <input type="number" id="cw_logs_gb" value="10" min="0" onchange="calcCosts()">
+                <label>Alarmas:</label>
+                <input type="number" id="cw_alarms" value="5" min="0" onchange="calcCosts()">
+                <p class="calc-rate">Dashboard $3/mes, Logs $0.50/GB ingesta + $0.03/GB storage, Alarma $0.10/mes</p>
+                <p class="calc-result" id="cw_cost">$23.50</p>
+            </div>
+        </div>
+
+        <div class="total-banner">
+            <h3>TOTAL ESTIMADO MENSUAL</h3>
+            <span class="total-price" id="total_cost">$4,577.99</span>
+        </div>
+
+        <h3 style="margin-top:30px;">Comparación de Escenarios</h3>
+        <div class="scenarios">
+            <div class="scenario sandbox">
+                <h4>🧪 Sandbox (opcional)</h4>
+                <span class="scenario-price">~$45/mes</span>
+                <ul>
+                    <li>enable_sandbox = true</li>
+                    <li>S3 Bronze/Silver/Gold aislados</li>
+                    <li>Redshift 4 RPU (minimo)</li>
+                    <li>Athena con limite 100MB/query</li>
+                    <li>SageMaker notebook t3.medium</li>
+                    <li>Datos expiran a 90 dias auto</li>
+                    <li>Aislado de produccion</li>
+                </ul>
+            </div>
+            <div class="scenario dev">
+                <h4>🔬 Desarrollo/POC</h4>
+                <span class="scenario-price">~$158/mes</span>
+                <ul>
+                    <li>100 GB en S3</li>
+                    <li>Redshift 4 RPU, 2hr/día</li>
+                    <li>Lambda + APIGW free tier</li>
+                    <li>SageMaker notebook básico</li>
+                    <li>Bedrock Haiku bajo uso</li>
+                </ul>
+            </div>
+            <div class="scenario uat">
+                <h4>✅ UAT (4 semanas)</h4>
+                <span class="scenario-price">~$959/ciclo</span>
+                <ul>
+                    <li>200 GB subset de prod</li>
+                    <li>Redshift 8 RPU, 10hr/día lab</li>
+                    <li>EKS 1 cluster + 2 nodos</li>
+                    <li>Glue jobs + crawlers diarios</li>
+                    <li>SageMaker endpoint validación</li>
+                    <li>Solo horario laboral (200 hrs)</li>
+                    <li>~$48/día | ~$240/semana</li>
+                </ul>
+            </div>
+            <div class="scenario prod">
+                <h4>🏢 Producción Moderada</h4>
+                <span class="scenario-price">~$4,441/mes</span>
+                <ul>
+                    <li>2 TB en S3</li>
+                    <li>Redshift 32 RPU, 6hr/día</li>
+                    <li>EKS cluster + 3 nodos</li>
+                    <li>Training GPU semanal</li>
+                    <li>Bedrock Sonnet moderado</li>
+                </ul>
+            </div>
+            <div class="scenario heavy">
+                <h4>🚀 Producción Intensiva</h4>
+                <span class="scenario-price">~$27,148/mes</span>
+                <ul>
+                    <li>20 TB en S3</li>
+                    <li>Redshift 32 RPU, 24/7</li>
+                    <li>EKS cluster + 10 nodos</li>
+                    <li>Multiple endpoints ML</li>
+                    <li>Bedrock Sonnet alto uso</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- TAB: Costos Detalle -->
+    <section id="costs-detail" class="tab-content">
+        <h2>Detalle Completo de Costos por Servicio</h2>
+
+        <div class="detail-section">
+            <h3>1. S3 - Almacenamiento Data Lake</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Standard (primeros 50 TB)</td><td>$0.023 / GB / mes</td></tr>
+                    <tr><td>Standard (siguientes 450 TB)</td><td>$0.022 / GB / mes</td></tr>
+                    <tr><td>Glacier (archivo)</td><td>$0.004 / GB / mes</td></tr>
+                    <tr><td>PUT/COPY/POST requests</td><td>$0.005 / 1,000 requests</td></tr>
+                    <tr><td>GET/SELECT requests</td><td>$0.0004 / 1,000 requests</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Volumen</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>100 GB (6 buckets)</td><td>~$14</td></tr>
+                    <tr><td>1 TB (6 buckets)</td><td>~$138</td></tr>
+                    <tr><td>10 TB (6 buckets)</td><td>~$1,380</td></tr>
+                    <tr><td>50 TB (6 buckets)</td><td>~$6,900</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>2. AWS Glue - Catalogo y ETL</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Data Catalog (primeros 1M objetos)</td><td>GRATIS</td></tr>
+                    <tr><td>Data Catalog (sobre 1M objetos)</td><td>$1.00 / 100K objetos / mes</td></tr>
+                    <tr><td>Data Catalog requests (primer millon)</td><td>GRATIS</td></tr>
+                    <tr><td>Data Catalog requests (sobre 1M)</td><td>$1.00 / 1M requests</td></tr>
+                    <tr><td>Crawlers</td><td>$0.44 / DPU-hora</td></tr>
+                    <tr><td>ETL Jobs (Spark)</td><td>$0.44 / DPU-hora</td></tr>
+                    <tr><td>ETL Jobs (Python Shell)</td><td>$0.44 / DPU-hora</td></tr>
+                    <tr><td>Minimo por ejecucion</td><td>1 minuto</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>2 crawlers diarios (10 min, 2 DPU c/u)</td><td>~$9</td></tr>
+                    <tr><td>1 ETL job diario (30 min, 5 DPU)</td><td>~$33</td></tr>
+                    <tr><td>5 ETL jobs diarios (1hr, 10 DPU)</td><td>~$660</td></tr>
+                    <tr><td>ETL intensivo (24/7, 20 DPU)</td><td>~$6,336</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>3. Amazon Athena - Consultas SQL</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Datos escaneados</td><td>$5.00 / TB</td></tr>
+                    <tr><td>Minimo por consulta</td><td>10 MB</td></tr>
+                    <tr><td>DDL (CREATE, ALTER, DROP)</td><td>GRATIS</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>10 consultas/dia (1 GB c/u)</td><td>~$1.50</td></tr>
+                    <tr><td>50 consultas/dia (5 GB c/u)</td><td>~$37.50</td></tr>
+                    <tr><td>200 consultas/dia (10 GB c/u)</td><td>~$300</td></tr>
+                    <tr><td>Analitica pesada (100 TB/mes)</td><td>~$500</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">Tip: Usar Parquet/ORC + particiones reduce costos 30-90%</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>4. Redshift Serverless</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Computo (RPU-hora) us-east-1</td><td>$0.375 / RPU-hora</td></tr>
+                    <tr><td>Base capacity minimo</td><td>4 RPU ($1.50/hr)</td></tr>
+                    <tr><td>Nuestro default</td><td>32 RPU ($12.00/hr)</td></tr>
+                    <tr><td>Storage (RMS)</td><td>$0.024 / GB / mes</td></tr>
+                    <tr><td>Cuando esta idle (auto-pause)</td><td>$0.00 (gratis)</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>4 RPU, 2 hrs/dia activo</td><td>~$90</td></tr>
+                    <tr><td>32 RPU, 4 hrs/dia activo</td><td>~$1,440</td></tr>
+                    <tr><td>32 RPU, 8 hrs/dia activo</td><td>~$2,880</td></tr>
+                    <tr><td>32 RPU, 24/7 (siempre activo)</td><td>~$8,640</td></tr>
+                    <tr><td>+ Storage 500 GB</td><td>~$12</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">Tip: Con auto-pause solo paga cuando hay queries activos</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>5. AWS Lambda</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Requests</td><td>$0.20 / 1M invocaciones</td></tr>
+                    <tr><td>Compute (x86)</td><td>$0.0000166667 / GB-segundo</td></tr>
+                    <tr><td>Compute (ARM/Graviton2)</td><td>$0.0000133334 / GB-segundo</td></tr>
+                    <tr><td>Free tier</td><td>1M req + 400K GB-sec / mes</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>1M invocaciones (128MB, 200ms)</td><td>~$0.53</td></tr>
+                    <tr><td>10M invocaciones (256MB, 500ms)</td><td>~$23</td></tr>
+                    <tr><td>50M invocaciones (512MB, 1s)</td><td>~$427</td></tr>
+                    <tr><td>100M invocaciones (1GB, 2s)</td><td>~$3,353</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>6. API Gateway</h3>
+            <table class="detail-table">
+                <thead><tr><th>Tipo</th><th>Precio</th></tr></thead>
+                <tbody>
+                    <tr><td>REST API (primeros 333M)</td><td>$3.50 / millon</td></tr>
+                    <tr><td>REST API (siguientes 667M)</td><td>$2.80 / millon</td></tr>
+                    <tr><td>HTTP API (primeros 300M)</td><td>$1.00 / millon</td></tr>
+                    <tr><td>HTTP API (mas de 300M)</td><td>$0.90 / millon</td></tr>
+                    <tr><td>Data transfer out</td><td>$0.09 / GB (primeros 10 TB)</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>1M requests (REST API)</td><td>~$3.50</td></tr>
+                    <tr><td>10M requests (REST API)</td><td>~$35</td></tr>
+                    <tr><td>100M requests (HTTP API)</td><td>~$100</td></tr>
+                    <tr><td>1B requests (HTTP API)</td><td>~$970</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">Tip: Usar HTTP APIs es 70% mas barato que REST APIs</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>7. Amazon EKS (Kubernetes)</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Cluster EKS (control plane)</td><td>$0.10 / hora (~$73/mes)</td></tr>
+                    <tr><td>Worker nodes</td><td>Precio EC2 segun instancia</td></tr>
+                    <tr><td>Extended support (K8s viejas)</td><td>$0.60 / hora</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Configuracion (cluster + nodos 24/7)</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>1 cluster + 2x t3.medium</td><td>~$134</td></tr>
+                    <tr><td>1 cluster + 3x m5.large</td><td>~$352</td></tr>
+                    <tr><td>1 cluster + 5x m5.xlarge</td><td>~$770</td></tr>
+                    <tr><td>1 cluster + 10x m5.2xlarge</td><td>~$2,873</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">Tip: Spot Instances reducen costos de nodos 60-90%</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>8. Amazon SageMaker</h3>
+            <table class="detail-table">
+                <thead><tr><th>Instancia</th><th>Precio/hora</th></tr></thead>
+                <tbody>
+                    <tr><td>Notebook ml.t3.medium</td><td>$0.050</td></tr>
+                    <tr><td>Notebook ml.m5.xlarge</td><td>$0.269</td></tr>
+                    <tr><td>Training ml.m5.xlarge</td><td>$0.269</td></tr>
+                    <tr><td>Training ml.p3.2xlarge (GPU)</td><td>$4.284</td></tr>
+                    <tr><td>Endpoint ml.m5.large</td><td>$0.134</td></tr>
+                    <tr><td>Storage (EBS)</td><td>$0.14 / GB / mes</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>1 notebook t3.med (8hrs/dia laborables)</td><td>~$8</td></tr>
+                    <tr><td>Training semanal (2hrs, m5.xlarge)</td><td>~$2</td></tr>
+                    <tr><td>Training semanal (4hrs, p3.2xlarge GPU)</td><td>~$69</td></tr>
+                    <tr><td>1 endpoint m5.large 24/7</td><td>~$97</td></tr>
+                    <tr><td>1 endpoint p3.2xlarge 24/7 (GPU)</td><td>~$3,084</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>9. Amazon Bedrock</h3>
+            <table class="detail-table">
+                <thead><tr><th>Modelo</th><th>Input / 1K tokens</th><th>Output / 1K tokens</th></tr></thead>
+                <tbody>
+                    <tr><td>Amazon Titan Text Lite</td><td>$0.0003</td><td>$0.0004</td></tr>
+                    <tr><td>Amazon Titan Text Express</td><td>$0.0008</td><td>$0.0016</td></tr>
+                    <tr><td>Claude 3 Haiku</td><td>$0.00025</td><td>$0.00125</td></tr>
+                    <tr><td>Claude 3.5 Sonnet</td><td>$0.003</td><td>$0.015</td></tr>
+                    <tr><td>Claude 3 Opus</td><td>$0.015</td><td>$0.075</td></tr>
+                    <tr><td>Meta Llama 3 8B</td><td>$0.0003</td><td>$0.0006</td></tr>
+                    <tr><td>Meta Llama 3 70B</td><td>$0.00265</td><td>$0.0035</td></tr>
+                    <tr><td>Mistral Large</td><td>$0.004</td><td>$0.012</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>1M tokens/dia (Claude Haiku)</td><td>~$11</td></tr>
+                    <tr><td>10M tokens/dia (Claude Haiku)</td><td>~$113</td></tr>
+                    <tr><td>1M tokens/dia (Claude 3.5 Sonnet)</td><td>~$270</td></tr>
+                    <tr><td>10M tokens/dia (Claude 3.5 Sonnet)</td><td>~$2,700</td></tr>
+                    <tr><td>Knowledge Base (1M docs, moderado)</td><td>~$50-200</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">Tip: Batch inference tiene 50% de descuento vs on-demand</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>10. Observabilidad (CloudWatch + SNS)</h3>
+            <table class="detail-table">
+                <thead><tr><th>Concepto</th><th>Precio Unitario</th></tr></thead>
+                <tbody>
+                    <tr><td>Dashboard personalizado</td><td>$3.00 / dashboard / mes</td></tr>
+                    <tr><td>Logs - Ingesta</td><td>$0.50 / GB</td></tr>
+                    <tr><td>Logs - Storage</td><td>$0.03 / GB / mes</td></tr>
+                    <tr><td>Metricas custom</td><td>$0.30 / metrica / mes</td></tr>
+                    <tr><td>Alarmas standard</td><td>$0.10 / alarma / mes</td></tr>
+                    <tr><td>SNS notificaciones (email)</td><td>Gratis (primeras 1,000/mes)</td></tr>
+                    <tr><td>SNS notificaciones (SMS)</td><td>$0.00645 / SMS (us-east-1)</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>6 dashboards + 5 alarmas + 10 GB logs</td><td>~$24</td></tr>
+                    <tr><td>6 dashboards + 10 alarmas + 50 GB logs</td><td>~$45</td></tr>
+                    <tr><td>10 dashboards + 20 alarmas + 200 GB logs</td><td>~$138</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">Tip: Configurar retention en logs (30 dias) para evitar costos de storage acumulado</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>11. Servicios Gratuitos</h3>
+            <table class="detail-table">
+                <thead><tr><th>Servicio</th><th>Costo</th></tr></thead>
+                <tbody>
+                    <tr><td>IAM Roles y Policies</td><td>GRATIS</td></tr>
+                    <tr><td>Security Groups</td><td>GRATIS</td></tr>
+                    <tr><td>Glue Data Catalog (primeros 1M objetos)</td><td>GRATIS</td></tr>
+                    <tr><td>Lambda Free Tier (1M req + 400K GB-sec/mes)</td><td>GRATIS</td></tr>
+                    <tr><td>API Gateway Free Tier (1M req/mes, 12 meses)</td><td>GRATIS</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3>UAT - Pruebas de Aceptacion (4 semanas)</h3>
+            <table class="detail-table">
+                <thead><tr><th>Servicio</th><th>Configuracion UAT</th><th>Costo ciclo</th></tr></thead>
+                <tbody>
+                    <tr><td>S3</td><td>200 GB datos de prueba</td><td>~$18</td></tr>
+                    <tr><td>Redshift</td><td>8 RPU, 200 hrs activo</td><td>~$600</td></tr>
+                    <tr><td>EKS</td><td>1 cluster + 2x t3.large, 200 hrs</td><td>~$103</td></tr>
+                    <tr><td>Glue Crawlers</td><td>2/dia x 20 dias (10 min, 2 DPU)</td><td>~$6</td></tr>
+                    <tr><td>Glue Jobs</td><td>3/dia x 20 dias (20 min, 5 DPU)</td><td>~$44</td></tr>
+                    <tr><td>Athena</td><td>50 queries/dia (2 GB c/u)</td><td>~$10</td></tr>
+                    <tr><td>Lambda</td><td>2M invocaciones</td><td>~$0.40</td></tr>
+                    <tr><td>API Gateway</td><td>2M requests</td><td>~$2</td></tr>
+                    <tr><td>SageMaker</td><td>Notebook + endpoint 200 hrs</td><td>~$35</td></tr>
+                    <tr><td>Bedrock</td><td>1M tok/dia (Haiku) x 20 dias</td><td>~$7.50</td></tr>
+                    <tr><td>CloudWatch</td><td>Logs + dashboards</td><td>~$9</td></tr>
+                    <tr><td colspan="2"><strong>SUBTOTAL</strong></td><td><strong>~$834</strong></td></tr>
+                    <tr><td colspan="2"><strong>+ Buffer 15%</strong></td><td><strong>~$125</strong></td></tr>
+                    <tr class="total-row"><td colspan="2"><strong>TOTAL CICLO UAT</strong></td><td><strong>~$959</strong></td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">~$48/dia laborable | ~$240/semana | Al terminar: terraform destroy = $0</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>Tips para Reducir Costos</h3>
+            <ol class="tips-list">
+                <li>S3: Lifecycle rules para mover datos viejos a Glacier ($0.004/GB)</li>
+                <li>Athena: Convertir datos a Parquet + particionar (ahorro 30-90%)</li>
+                <li>Redshift: Habilitar auto-pause (no cobra cuando idle)</li>
+                <li>Lambda: Usar ARM/Graviton2 (20% mas barato)</li>
+                <li>EKS: Usar Spot Instances para nodos (ahorro 60-90%)</li>
+                <li>Glue: Auto-scaling de DPUs y job bookmarks</li>
+                <li>Bedrock: Batch inference (50% descuento) cuando no es real-time</li>
+                <li>SageMaker: Apagar notebooks fuera de horario, Spot Training</li>
+                <li>General: Reserved Capacity / Savings Plans (ahorro 20-40%)</li>
+                <li>API Gateway: Usar HTTP APIs en vez de REST APIs (70% mas barato)</li>
+            </ol>
+        </div>
+
+        <p class="detail-footer">Precios region us-east-1, julio 2025. Sujetos a cambio por AWS.</p>
+    </section>
+
+    <!-- TAB: Terraform -->
+    <section id="terraform" class="tab-content">
+        <h2>Estructura de Archivos Terraform</h2>
+        <div class="mermaid">
+graph TB
+    subgraph TF["Terraform Files"]
+        MAIN["main.tf - S3 buckets, Glue Catalog, Glue Crawlers, Athena, Redshift, Lambda Processor, S3 Notifications, SG"]
+        IAM["iam.tf - Roles: Glue, Redshift, Athena"]
+        IAM_AI["iam_ai.tf - Roles: SageMaker, Bedrock"]
+        IAM_COMP["iam_compute.tf - Roles: Lambda, APIGW, EKS"]
+        STREAMING["streaming.tf - MSK Kafka cluster"]
+        SERVING["outputs_serving.tf - API GW, Lambdas serving, SageMaker Domain"]
+        SANDBOX["sandbox.tf - Ambiente aislado opcional"]
+        OBS["observability.tf - Dashboards, alarmas, logs"]
+        VARS["variables.tf - Inputs"]
+        OUTPUTS["outputs.tf - ARNs y endpoints"]
+        LOCALS["locals.tf - Tags comunes"]
+    end
+
+    subgraph Resources["Recursos Creados"]
+        S3_R["6 S3 Buckets: Landing, Bronze, Silver, Gold, Athena Results, SageMaker Artifacts"]
+        LAMBDA_R["Lambda: landing-processor + serving-gold + serving-ml"]
+        MSK_R["MSK Kafka Cluster + Security Group"]
+        GLUE_R["Glue Data Catalog DB + 2 Crawlers"]
+        ATHENA_R["Athena Workgroup"]
+        RS_R["Redshift Serverless: Namespace + Workgroup"]
+        SERVING_R["API Gateway REST + SageMaker Domain"]
+        SG_R["Security Groups"]
+        ROLES_R["9 IAM Roles + 23 Politicas"]
+    end
+
+    MAIN --> S3_R
+    MAIN --> LAMBDA_R
+    MAIN --> GLUE_R
+    MAIN --> ATHENA_R
+    MAIN --> RS_R
+    MAIN --> SG_R
+    STREAMING --> MSK_R
+    SERVING --> SERVING_R
+    SERVING --> LAMBDA_R
+    IAM --> ROLES_R
+    IAM_AI --> ROLES_R
+    IAM_COMP --> ROLES_R
+        </div>
+
+        <h3 style="margin-top:30px;">Recursos por archivo</h3>
+        <div class="detail-section">
+            <table class="detail-table">
+                <thead><tr><th>Archivo</th><th>Recursos</th></tr></thead>
+                <tbody>
+                    <tr><td><code>main.tf</code></td><td>S3 Landing + Bronze + Silver + Gold + Athena Results, Glue Catalog Database, 2 Glue Crawlers, Athena Workgroup, Redshift Namespace + Workgroup, Security Group, Lambda landing-processor, S3 Event Notification</td></tr>
+                    <tr><td><code>streaming.tf</code></td><td>MSK Kafka cluster (3 brokers), Security Group MSK, CloudWatch Log Group</td></tr>
+                    <tr><td><code>outputs_serving.tf</code></td><td>API Gateway REST, Lambda serving-gold, Lambda serving-ml, SageMaker Domain (Studio Unified)</td></tr>
+                    <tr><td><code>sandbox.tf</code></td><td>S3 sandbox (bronze/silver/gold), Glue DB + Crawler, Athena workgroup con limite, Redshift 4 RPU, SageMaker notebook. Todo condicional con enable_sandbox = true</td></tr>
+                    <tr><td><code>observability.tf</code></td><td>6 CloudWatch Dashboards (General, Ingesta, ETL, Analitica, IA/ML, Serving), 5 Alarmas criticas, SNS Topics, Log Groups centralizados</td></tr>
+                    <tr><td><code>iam.tf</code></td><td>glue_role, redshift_role, athena_role + politicas S3/Glue/Athena</td></tr>
+                    <tr><td><code>iam_ai.tf</code></td><td>sagemaker_role, bedrock_role + S3 Artifacts bucket + politicas S3/Glue/ECR/Bedrock</td></tr>
+                    <tr><td><code>iam_compute.tf</code></td><td>lambda_role, apigw_role, eks_cluster_role, eks_node_role + politicas S3/Glue/Athena/SQS/SNS/VPC/MSK/SageMaker</td></tr>
+                    <tr><td><code>variables.tf</code></td><td>region, project_name, environment, vpc_id, subnet_ids, redshift config</td></tr>
+                    <tr><td><code>outputs.tf</code></td><td>ARNs de buckets, roles, endpoints de Redshift, nombres de workgroups</td></tr>
+                    <tr><td><code>locals.tf</code></td><td>Tags comunes (Project, Environment, ManagedBy)</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h3 style="margin-top:30px;">Comandos</h3>
+        <div class="commands">
+            <code>terraform init</code> - Descarga providers (aws + archive)<br>
+            <code>terraform plan</code> - Muestra cambios pendientes<br>
+            <code>terraform apply</code> - Aplica la infraestructura<br>
+            <code>terraform destroy</code> - Elimina todo<br>
+            <code>terraform workspace new uat</code> - Crear ambiente UAT separado<br>
+            <code>terraform graph | dot -Tsvg > graph.svg</code> - Grafo de dependencias
+        </div>
+    </section>
+</div>
+
+<style>
+    .tabs {
+        display: flex; gap: 8px; margin: 30px 0 20px;
+        flex-wrap: wrap; border-bottom: 2px solid #334155; padding-bottom: 10px;
+    }
+    .tab {
+        padding: 10px 20px; border: none; border-radius: 8px 8px 0 0;
+        background: #1e293b; color: #94a3b8; cursor: pointer;
+        font-size: 0.95rem; font-weight: 500; transition: all 0.2s;
+    }
+    .tab:hover { background: #334155; color: #e2e8f0; }
+    .tab.active { background: #38bdf8; color: #0f172a; }
+    .tab-content { display: none; animation: fadeIn 0.3s; }
+    .tab-content.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .tab-content h2 {
+        font-size: 1.5rem; color: #38bdf8; margin: 20px 0 15px;
+        border-bottom: 1px solid #334155; padding-bottom: 10px;
+    }
+    .tab-content h3 { color: #f1f5f9; margin: 15px 0 10px; }
+    .mermaid {
+        background: #1e293b; border-radius: 12px; padding: 30px;
+        margin: 15px 0; border: 1px solid #334155;
+    }
+    .costs-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 16px; margin: 20px 0;
+    }
+    .cost-card {
+        background: #1e293b; border-radius: 12px; padding: 20px;
+        border: 1px solid #334155; transition: transform 0.2s, border-color 0.2s;
+    }
+    .cost-card:hover { transform: translateY(-3px); border-color: #38bdf8; }
+    .cost-icon { font-size: 2rem; margin-bottom: 8px; }
+    .cost-card h3 { color: #f1f5f9; font-size: 1rem; margin-bottom: 6px; }
+    .cost-price { color: #38bdf8; font-size: 1.1rem; font-weight: 700; }
+    .cost-detail { color: #94a3b8; font-size: 0.85rem; margin-top: 4px; }
+    .calc-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px; margin: 20px 0;
+    }
+    .calc-card {
+        background: #1e293b; border-radius: 12px; padding: 18px;
+        border: 1px solid #334155; transition: border-color 0.2s;
+    }
+    .calc-card:hover { border-color: #38bdf8; }
+    .calc-icon { font-size: 1.8rem; margin-bottom: 6px; }
+    .calc-card h3 { color: #f1f5f9; font-size: 0.95rem; margin-bottom: 10px; }
+    .calc-card label { display: block; color: #94a3b8; font-size: 0.78rem; margin-top: 8px; }
+    .calc-card input, .calc-card select {
+        width: 100%; padding: 6px 10px; margin-top: 3px;
+        background: #0f172a; border: 1px solid #475569; border-radius: 6px;
+        color: #e2e8f0; font-size: 0.9rem;
+    }
+    .calc-card input:focus, .calc-card select:focus { border-color: #38bdf8; outline: none; }
+    .calc-rate { color: #64748b; font-size: 0.75rem; margin-top: 8px; }
+    .calc-result {
+        color: #4ade80; font-size: 1.2rem; font-weight: 700; margin-top: 6px;
+        padding: 4px 0; border-top: 1px solid #334155;
+    }
+    .total-banner {
+        background: linear-gradient(135deg, #1e3a5f, #0f172a); border: 2px solid #38bdf8;
+        border-radius: 12px; padding: 20px 30px; margin: 25px 0;
+        display: flex; justify-content: space-between; align-items: center;
+    }
+    .total-banner h3 { color: #94a3b8; font-size: 1rem; }
+    .total-price { color: #38bdf8; font-size: 2rem; font-weight: 700; }
+</style>
+
+<style>
+    .scenarios {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 16px; margin: 20px 0;
+    }
+    .scenario {
+        border-radius: 12px; padding: 20px;
+        border: 1px solid #334155; background: #1e293b;
+    }
+    .scenario h4 { font-size: 1.1rem; margin-bottom: 8px; }
+    .scenario-price {
+        display: inline-block; font-size: 1.4rem; font-weight: 700;
+        margin-bottom: 12px; padding: 4px 12px; border-radius: 6px;
+    }
+    .scenario.dev .scenario-price { color: #4ade80; background: #052e16; }
+    .scenario.sandbox .scenario-price { color: #67e8f9; background: #083344; }
+    .scenario.uat .scenario-price { color: #a78bfa; background: #1e1b4b; }
+    .scenario.prod .scenario-price { color: #facc15; background: #422006; }
+    .scenario.heavy .scenario-price { color: #f87171; background: #450a0a; }
+    .scenario ul { list-style: none; padding: 0; }
+    .scenario li {
+        padding: 4px 0; color: #94a3b8; font-size: 0.9rem;
+        border-bottom: 1px solid #1e293b;
+    }
+    .scenario li::before { content: "→ "; color: #64748b; }
+    .commands {
+        background: #1e293b; border-radius: 12px; padding: 20px;
+        border: 1px solid #334155; font-family: 'Fira Code', monospace;
+        font-size: 0.9rem; line-height: 2;
+    }
+    .commands code {
+        background: #334155; padding: 3px 8px; border-radius: 4px;
+        color: #38bdf8;
+    }
+    .iam-detail-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 16px; margin: 20px 0;
+    }
+    .iam-card {
+        background: #1e293b; border-radius: 12px; padding: 18px;
+        border: 1px solid #334155; transition: border-color 0.2s;
+    }
+    .iam-card:hover { border-color: #38bdf8; }
+    .iam-card h4 { color: #38bdf8; margin-bottom: 10px; font-size: 1rem; }
+    .iam-card ul { list-style: none; padding: 0; }
+    .iam-card li {
+        padding: 4px 0; color: #94a3b8; font-size: 0.82rem;
+        border-bottom: 1px solid #0f172a;
+    }
+    .iam-card li:last-child { border-bottom: none; }
+    .policy-managed {
+        background: #1e3a5f; color: #7dd3fc; padding: 2px 6px;
+        border-radius: 3px; font-size: 0.78rem;
+    }
+    .spec-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 16px; margin: 20px 0;
+    }
+    .spec-card {
+        background: #1e293b; border-radius: 12px; padding: 20px;
+        border: 1px solid #334155; transition: border-color 0.2s;
+    }
+    .spec-card:hover { border-color: #38bdf8; }
+    .spec-card h4 {
+        color: #38bdf8; margin-bottom: 10px; font-size: 1rem;
+        border-bottom: 1px solid #334155; padding-bottom: 8px;
+    }
+    .spec-card p { color: #94a3b8; font-size: 0.88rem; line-height: 1.7; }
+    .spec-card strong { color: #e2e8f0; }
+    .fullscreen-btn {
+        background: #334155; color: #94a3b8; border: 1px solid #475569;
+        border-radius: 6px; padding: 4px 12px; cursor: pointer;
+        font-size: 0.8rem; margin-left: 12px; transition: all 0.2s;
+        vertical-align: middle;
+    }
+    .fullscreen-btn:hover { background: #38bdf8; color: #0f172a; }
+    .fullscreen-overlay {
+        display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: #0f172a; z-index: 9999; overflow: auto; padding: 40px;
+        flex-direction: column;
+    }
+    .fullscreen-overlay.active { display: flex; align-items: center; justify-content: center; }
+    .fullscreen-overlay .mermaid-clone {
+        width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+        overflow: auto;
+    }
+    .fullscreen-overlay .mermaid-clone svg {
+        max-width: 95vw; max-height: 85vh; width: auto; height: auto;
+    }
+    .fullscreen-close {
+        position: fixed; top: 20px; right: 30px; background: #ef4444; color: white;
+        border: none; border-radius: 8px; padding: 10px 20px; cursor: pointer;
+        font-size: 1rem; font-weight: 700; z-index: 10000;
+    }
+    .fullscreen-close:hover { background: #dc2626; }
+    .detail-section {
+        background: #1e293b; border-radius: 12px; padding: 20px;
+        margin: 16px 0; border: 1px solid #334155;
+    }
+    .detail-section h3 { color: #38bdf8; margin-bottom: 12px; font-size: 1.1rem; }
+    .detail-table {
+        width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.88rem;
+    }
+    .detail-table thead { background: #334155; }
+    .detail-table th {
+        padding: 8px 12px; text-align: left; color: #f1f5f9; font-weight: 600;
+    }
+    .detail-table td { padding: 7px 12px; border-bottom: 1px solid #334155; color: #cbd5e1; }
+    .detail-table tr:hover td { background: #334155; }
+    .detail-table .total-row td { background: #1e3a5f; color: #38bdf8; font-weight: 700; }
+    .detail-tip {
+        margin-top: 8px; padding: 8px 12px; background: #052e16;
+        border-left: 3px solid #4ade80; border-radius: 4px;
+        color: #86efac; font-size: 0.85rem;
+    }
+    .tips-list {
+        padding-left: 20px; color: #94a3b8; font-size: 0.9rem;
+    }
+    .tips-list li { padding: 4px 0; }
+    .detail-footer {
+        text-align: center; color: #64748b; font-size: 0.8rem;
+        margin-top: 20px; padding-top: 15px; border-top: 1px solid #334155;
+    }
+    footer {
+        text-align: center; padding: 30px; margin-top: 40px;
+        border-top: 1px solid #334155; color: #64748b; font-size: 0.85rem;
+    }
+</style>
+
+<footer>
+    <p>Data Lake AWS - Generado automáticamente desde Terraform</p>
+    <p>Última actualización: <span id="lastUpdate"></span></p>
+</footer>
+
+<script>
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // Fecha
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleDateString('es-ES', {
+        year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+
+    // Mermaid config
+    mermaid.initialize({
+        startOnLoad: true,
+        theme: 'dark',
+        themeVariables: {
+            primaryColor: '#38bdf8',
+            primaryTextColor: '#f1f5f9',
+            primaryBorderColor: '#334155',
+            lineColor: '#64748b',
+            secondaryColor: '#1e293b',
+            tertiaryColor: '#0f172a',
+            background: '#1e293b',
+            mainBkg: '#1e293b',
+            nodeBorder: '#38bdf8'
+        }
+    });
+
+    // Fullscreen diagram
+    function openFullscreen(elementId) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        const svg = el.querySelector('svg');
+        if (!svg) return;
+
+        let overlay = document.getElementById('fullscreen-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'fullscreen-overlay';
+            overlay.className = 'fullscreen-overlay';
+            overlay.innerHTML = '<button class="fullscreen-close" onclick="closeFullscreen()">✕ Cerrar</button><div class="mermaid-clone"></div>';
+            document.body.appendChild(overlay);
+        }
+        const clone = overlay.querySelector('.mermaid-clone');
+        const svgClone = svg.cloneNode(true);
+        svgClone.removeAttribute('height');
+        svgClone.removeAttribute('width');
+        svgClone.style.maxWidth = '95vw';
+        svgClone.style.maxHeight = '85vh';
+        svgClone.style.width = 'auto';
+        svgClone.style.height = 'auto';
+        clone.innerHTML = '';
+        clone.appendChild(svgClone);
+        overlay.classList.add('active');
+        document.addEventListener('keydown', escFullscreen);
+    }
+
+    function closeFullscreen() {
+        const overlay = document.getElementById('fullscreen-overlay');
+        if (overlay) overlay.classList.remove('active');
+        document.removeEventListener('keydown', escFullscreen);
+    }
+
+    function escFullscreen(e) {
+        if (e.key === 'Escape') closeFullscreen();
+    }
+
+    // Calculadora de costos
+    function calcCosts() {
+        const fmt = (n) => '$' + n.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+        // S3
+        const s3gb = parseFloat(document.getElementById('s3_gb').value) || 0;
+        const s3cost = s3gb * 0.023;
+        document.getElementById('s3_cost').textContent = fmt(s3cost);
+
+        // Glue
+        const glueJobs = parseFloat(document.getElementById('glue_jobs').value) || 0;
+        const glueDpus = parseFloat(document.getElementById('glue_dpus').value) || 0;
+        const glueMin = parseFloat(document.getElementById('glue_min').value) || 0;
+        const glueCost = glueJobs * glueDpus * (glueMin / 60) * 0.44 * 30;
+        document.getElementById('glue_cost').textContent = fmt(glueCost);
+
+        // Athena
+        const athenaQ = parseFloat(document.getElementById('athena_queries').value) || 0;
+        const athenaGb = parseFloat(document.getElementById('athena_gb').value) || 0;
+        const athenaCost = athenaQ * athenaGb * 30 * (5 / 1000);
+        document.getElementById('athena_cost').textContent = fmt(athenaCost);
+
+        // Redshift
+        const rsRpus = parseFloat(document.getElementById('rs_rpus').value) || 0;
+        const rsHours = parseFloat(document.getElementById('rs_hours').value) || 0;
+        const rsCost = rsRpus * rsHours * 0.375 * 30;
+        document.getElementById('rs_cost').textContent = fmt(rsCost);
+
+        // Lambda
+        const lambdaM = parseFloat(document.getElementById('lambda_millions').value) || 0;
+        const lambdaMb = parseFloat(document.getElementById('lambda_mb').value) || 0;
+        const lambdaMs = parseFloat(document.getElementById('lambda_ms').value) || 0;
+        const lambdaReq = lambdaM * 0.20;
+        const lambdaComp = lambdaM * 1000000 * (lambdaMb / 1024) * (lambdaMs / 1000) * 0.0000166667;
+        const lambdaCost = lambdaReq + lambdaComp;
+        document.getElementById('lambda_cost').textContent = fmt(lambdaCost);
+
+        // API Gateway
+        const apigwM = parseFloat(document.getElementById('apigw_millions').value) || 0;
+        const apigwCost = apigwM * 1.0;
+        document.getElementById('apigw_cost').textContent = fmt(apigwCost);
+
+        // EKS
+        const eksNodes = parseFloat(document.getElementById('eks_nodes').value) || 0;
+        const eksType = parseFloat(document.getElementById('eks_type').value) || 0;
+        const eksCost = (0.10 + eksNodes * eksType) * 730;
+        document.getElementById('eks_cost').textContent = fmt(eksCost);
+
+        // SageMaker
+        const smNbHrs = parseFloat(document.getElementById('sm_nb_hours').value) || 0;
+        const smEps = parseFloat(document.getElementById('sm_endpoints').value) || 0;
+        const smEpType = parseFloat(document.getElementById('sm_ep_type').value) || 0;
+        const smCost = (smNbHrs * 22 * 0.05) + (smEps * smEpType * 730);
+        document.getElementById('sm_cost').textContent = fmt(smCost);
+
+        // Bedrock
+        const brM = parseFloat(document.getElementById('bedrock_millions').value) || 0;
+        const brModel = parseFloat(document.getElementById('bedrock_model').value) || 0;
+        // input + output (output ~3x input price, promedio ~4.5x total)
+        const brCost = brM * 1000 * brModel * 30 * 3;
+        document.getElementById('bedrock_cost').textContent = fmt(brCost);
+
+        // MSK
+        const mskBrokers = parseFloat(document.getElementById('msk_brokers').value) || 0;
+        const mskType = parseFloat(document.getElementById('msk_type').value) || 0;
+        const mskStorage = parseFloat(document.getElementById('msk_storage').value) || 0;
+        const mskCost = (mskBrokers * mskType * 730) + (mskBrokers * mskStorage * 0.10);
+        document.getElementById('msk_cost').textContent = fmt(mskCost);
+
+        // Observabilidad (CloudWatch)
+        const cwDashboards = parseFloat(document.getElementById('cw_dashboards').value) || 0;
+        const cwLogsGb = parseFloat(document.getElementById('cw_logs_gb').value) || 0;
+        const cwAlarms = parseFloat(document.getElementById('cw_alarms').value) || 0;
+        const cwCost = (cwDashboards * 3) + (cwLogsGb * 0.50) + (cwLogsGb * 0.03) + (cwAlarms * 0.10);
+        document.getElementById('cw_cost').textContent = fmt(cwCost);
+
+        // Total
+        const total = s3cost + glueCost + athenaCost + rsCost + lambdaCost + apigwCost + eksCost + smCost + brCost + mskCost + cwCost;
+        document.getElementById('total_cost').textContent = fmt(total);
+    }
+
+    // Calcular al cargar
+    setTimeout(calcCosts, 100);
+</script>
+</body>
+</html>

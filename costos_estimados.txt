@@ -1,0 +1,470 @@
+================================================================================
+ESTIMACIÓN DE COSTOS - DATA LAKE AWS
+================================================================================
+
+Estimación basada en precios públicos de AWS (región us-east-1).
+Los costos reales dependerán del uso, volumen de datos y tiempo de ejecución.
+Precios sujetos a cambio. Fuente: páginas de pricing de AWS (julio 2025).
+
+================================================================================
+RESUMEN EJECUTIVO
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Costo mensual estimado (uso moderado):   $800 - $2,500 USD/mes             │
+│ Costo mensual estimado (uso alto):       $3,000 - $10,000+ USD/mes         │
+│ Costo mínimo (desarrollo/pruebas):       $250 - $500 USD/mes               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+DETALLE POR SERVICIO
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+1. S3 - ALMACENAMIENTO (DATA LAKE)
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - Standard: $0.023 por GB/mes (primeros 50 TB)
+   - Standard: $0.022 por GB/mes (siguientes 450 TB)
+   - Requests PUT/COPY/POST: $0.005 por 1,000 requests
+   - Requests GET/SELECT: $0.0004 por 1,000 requests
+
+   Escenarios:
+   ┌──────────────────┬─────────────────┬────────────────────┐
+   │ Volumen de datos │ Storage/mes     │ Costo aprox/mes    │
+   ├──────────────────┼─────────────────┼────────────────────┤
+   │ 100 GB           │ 4 buckets       │ ~$9                │
+   │ 1 TB             │ 4 buckets       │ ~$92               │
+   │ 10 TB            │ 4 buckets       │ ~$920              │
+   │ 50 TB            │ 4 buckets       │ ~$4,500            │
+   └──────────────────┴─────────────────┴────────────────────┘
+
+   Nota: El bucket de artefactos de SageMaker se suma aparte.
+
+────────────────────────────────────────────────────────────────────────────────
+2. AWS GLUE - CATÁLOGO Y ETL
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - Glue Data Catalog: Gratis (primeros 1M objetos almacenados)
+   - Crawlers: $0.44 por DPU-hora (mínimo 10 min por ejecución)
+   - ETL Jobs (Spark): $0.44 por DPU-hora
+   - ETL Jobs (Python Shell): $0.44 por DPU-hora (mínimo 1 DPU)
+
+   Escenarios:
+   ┌──────────────────────────────────┬────────────────────┐
+   │ Uso                              │ Costo aprox/mes    │
+   ├──────────────────────────────────┼────────────────────┤
+   │ 2 crawlers diarios (10 min c/u)  │ ~$9                │
+   │ 1 ETL job diario (30 min, 5 DPU)│ ~$33               │
+   │ 5 ETL jobs diarios (1hr, 10 DPU)│ ~$660              │
+   │ ETL intensivo (24/7, 20 DPU)    │ ~$6,336            │
+   └──────────────────────────────────┴────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+3. AMAZON ATHENA - CONSULTAS SQL
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - $5.00 por TB de datos escaneados
+   - Mínimo 10 MB por consulta
+   - Cancelled queries se cobran por datos escaneados antes de cancelar
+   - DDL (CREATE, ALTER, DROP): Gratis
+
+   Escenarios:
+   ┌──────────────────────────────────┬────────────────────┐
+   │ Uso                              │ Costo aprox/mes    │
+   ├──────────────────────────────────┼────────────────────┤
+   │ 10 consultas/día (1 GB c/u)     │ ~$1.50             │
+   │ 50 consultas/día (5 GB c/u)     │ ~$37.50            │
+   │ 200 consultas/día (10 GB c/u)   │ ~$300              │
+   │ Analítica pesada (100 TB/mes)   │ ~$500              │
+   └──────────────────────────────────┴────────────────────┘
+
+   Tip: Usar formato Parquet/ORC + particiones reduce costos 30-90%.
+
+────────────────────────────────────────────────────────────────────────────────
+4. AMAZON REDSHIFT SERVERLESS
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - $0.375 por RPU-hora (us-east-1)
+   - Base capacity configurable: mínimo 4 RPU ($1.50/hr)
+   - Nuestro default: 32 RPU ($12.00/hr cuando activo)
+   - Storage: $0.024 por GB/mes (RMS)
+   - Se cobra por segundo (mínimo 60 segundos por query)
+   - NO se cobra cuando está inactivo (auto-pause)
+
+   Escenarios:
+   ┌──────────────────────────────────┬────────────────────┐
+   │ Uso                              │ Costo aprox/mes    │
+   ├──────────────────────────────────┼────────────────────┤
+   │ 4 RPU, 2 hrs/día activo         │ ~$90               │
+   │ 32 RPU, 4 hrs/día activo        │ ~$1,440            │
+   │ 32 RPU, 8 hrs/día activo        │ ~$2,880            │
+   │ 32 RPU, 24/7 (siempre activo)   │ ~$8,640            │
+   │ + Storage 500 GB                 │ ~$12               │
+   └──────────────────────────────────┴────────────────────┘
+
+   Nota: Con auto-pause habilitado, solo paga cuando hay queries activos.
+
+────────────────────────────────────────────────────────────────────────────────
+5. AWS LAMBDA
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - Requests: $0.20 por 1 millón de invocaciones
+   - Compute (x86): $0.0000166667 por GB-segundo
+   - Compute (ARM): $0.0000133334 por GB-segundo
+   - Free tier: 1M requests + 400,000 GB-seconds/mes
+
+   Escenarios:
+   ┌────────────────────────────────────────────┬────────────────────┐
+   │ Uso                                        │ Costo aprox/mes    │
+   ├────────────────────────────────────────────┼────────────────────┤
+   │ 1M invocaciones (128MB, 200ms c/u)         │ ~$0.53             │
+   │ 10M invocaciones (256MB, 500ms c/u)        │ ~$23               │
+   │ 50M invocaciones (512MB, 1s c/u)           │ ~$427              │
+   │ 100M invocaciones (1GB, 2s c/u)            │ ~$3,353            │
+   └────────────────────────────────────────────┴────────────────────┘
+
+   Nota: Para orquestación del data lake, el uso típico está en 1-10M/mes.
+
+────────────────────────────────────────────────────────────────────────────────
+6. API GATEWAY
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio (REST API):
+   - Primeros 333M requests: $3.50 por millón
+   - Siguientes 667M: $2.80 por millón
+   - Más de 1B: $2.38 por millón
+   - Data transfer out: $0.09/GB (primeros 10 TB)
+
+   Precio (HTTP API - más económica):
+   - Primeros 300M requests: $1.00 por millón
+   - Más de 300M: $0.90 por millón
+
+   Escenarios:
+   ┌──────────────────────────────────┬────────────────────┐
+   │ Uso                              │ Costo aprox/mes    │
+   ├──────────────────────────────────┼────────────────────┤
+   │ 1M requests (REST API)           │ ~$3.50             │
+   │ 10M requests (REST API)          │ ~$35               │
+   │ 100M requests (HTTP API)         │ ~$100              │
+   │ 1B requests (HTTP API)           │ ~$970              │
+   └──────────────────────────────────┴────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+7. AMAZON EKS (KUBERNETES)
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - Cluster EKS (control plane): $0.10 por hora ($73/mes)
+   - Worker nodes: precio de EC2 (según instancia)
+   - Extended support (K8s versions viejas): $0.60/hr
+
+   Escenarios (cluster + nodos):
+   ┌──────────────────────────────────────────────┬────────────────────┐
+   │ Configuración                                │ Costo aprox/mes    │
+   ├──────────────────────────────────────────────┼────────────────────┤
+   │ 1 cluster + 2x t3.medium (24/7)             │ ~$134              │
+   │ 1 cluster + 3x m5.large (24/7)              │ ~$352              │
+   │ 1 cluster + 5x m5.xlarge (24/7)             │ ~$770              │
+   │ 1 cluster + 10x m5.2xlarge (24/7)           │ ~$2,873            │
+   └──────────────────────────────────────────────┴────────────────────┘
+
+   Nota: Usar Spot instances puede reducir costos de nodos 60-90%.
+
+────────────────────────────────────────────────────────────────────────────────
+8. AMAZON SAGEMAKER
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio (principales):
+   - Notebook ml.t3.medium: $0.050/hr
+   - Notebook ml.m5.xlarge: $0.269/hr
+   - Training ml.m5.xlarge: $0.269/hr
+   - Training ml.p3.2xlarge (GPU): $4.284/hr
+   - Endpoint ml.m5.large: $0.134/hr
+   - Storage (EBS): $0.14 por GB/mes
+
+   Escenarios:
+   ┌────────────────────────────────────────────────┬────────────────────┐
+   │ Uso                                            │ Costo aprox/mes    │
+   ├────────────────────────────────────────────────┼────────────────────┤
+   │ 1 notebook ml.t3.medium (8hrs/día laborables)  │ ~$8                │
+   │ Training job semanal (2hrs, ml.m5.xlarge)      │ ~$2                │
+   │ Training job semanal (4hrs, ml.p3.2xlarge GPU) │ ~$69               │
+   │ 1 endpoint ml.m5.large 24/7                    │ ~$97               │
+   │ 1 endpoint ml.p3.2xlarge 24/7 (GPU)           │ ~$3,084            │
+   └────────────────────────────────────────────────┴────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+9. AMAZON BEDROCK
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio (on-demand, por 1,000 tokens):
+   ┌─────────────────────────────┬──────────────┬───────────────┐
+   │ Modelo                      │ Input/1K tok │ Output/1K tok │
+   ├─────────────────────────────┼──────────────┼───────────────┤
+   │ Amazon Titan Text Lite      │ $0.0003      │ $0.0004       │
+   │ Amazon Titan Text Express   │ $0.0008      │ $0.0016       │
+   │ Claude 3 Haiku              │ $0.00025     │ $0.00125      │
+   │ Claude 3.5 Sonnet           │ $0.003       │ $0.015        │
+   │ Claude 3 Opus               │ $0.015       │ $0.075        │
+   │ Meta Llama 3 8B             │ $0.0003      │ $0.0006       │
+   │ Meta Llama 3 70B            │ $0.00265     │ $0.0035       │
+   │ Mistral Large               │ $0.004       │ $0.012        │
+   └─────────────────────────────┴──────────────┴───────────────┘
+
+   Escenarios:
+   ┌────────────────────────────────────────────────┬────────────────────┐
+   │ Uso                                            │ Costo aprox/mes    │
+   ├────────────────────────────────────────────────┼────────────────────┤
+   │ 1M tokens/día (Claude Haiku)                   │ ~$11               │
+   │ 10M tokens/día (Claude Haiku)                  │ ~$113              │
+   │ 1M tokens/día (Claude 3.5 Sonnet)              │ ~$270              │
+   │ 10M tokens/día (Claude 3.5 Sonnet)             │ ~$2,700            │
+   │ Knowledge Base (1M docs, consultas moderadas)  │ ~$50-200           │
+   └────────────────────────────────────────────────┴────────────────────┘
+
+   Nota: Batch inference tiene 50% de descuento vs. on-demand.
+
+────────────────────────────────────────────────────────────────────────────────
+10. OBSERVABILIDAD (CloudWatch + SNS)
+────────────────────────────────────────────────────────────────────────────────
+
+   Precio:
+   - Dashboard personalizado: $3.00 / dashboard / mes
+   - Logs ingesta: $0.50 por GB
+   - Logs storage: $0.03 por GB / mes
+   - Métricas custom: $0.30 por métrica / mes
+   - Alarmas standard: $0.10 por alarma / mes
+   - SNS email: Gratis (primeras 1,000/mes)
+
+   Escenarios:
+   ┌──────────────────────────────────────────────────┬────────────────────┐
+   │ Uso                                              │ Costo aprox/mes    │
+   ├──────────────────────────────────────────────────┼────────────────────┤
+   │ 6 dashboards + 5 alarmas + 10 GB logs            │ ~$24               │
+   │ 6 dashboards + 10 alarmas + 50 GB logs           │ ~$45               │
+   │ 10 dashboards + 20 alarmas + 200 GB logs         │ ~$138              │
+   └──────────────────────────────────────────────────┴────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+11. IAM, SECURITY GROUPS
+────────────────────────────────────────────────────────────────────────────────
+
+   - IAM Roles y Policies: GRATIS (sin costo)
+   - Security Groups: GRATIS (sin costo)
+
+================================================================================
+ESCENARIOS COMPLETOS DE EJEMPLO
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ESCENARIO 1: DESARROLLO / POC                                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ - S3: 100 GB datos                                    ~$9                   │
+│ - Glue: 2 crawlers diarios + 1 job ETL              ~$42                   │
+│ - Athena: 20 consultas/día (1 GB c/u)               ~$3                    │
+│ - Redshift: 4 RPU, 2 hrs/día                        ~$90                   │
+│ - Lambda: 500K invocaciones                          ~$0 (free tier)        │
+│ - API Gateway: 500K requests                         ~$0 (free tier)        │
+│ - EKS: No (usar Lambda)                             ~$0                    │
+│ - SageMaker: 1 notebook t3.med (8h/día lab)         ~$8                    │
+│ - Bedrock: 500K tokens/día (Haiku)                  ~$6                    │
+│ ─────────────────────────────────────────────────────────────               │
+│ TOTAL APROXIMADO:                                    ~$158/mes             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ESCENARIO 2: PRODUCCIÓN MODERADA                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ - S3: 2 TB datos                                     ~$184                  │
+│ - Glue: 5 crawlers + 3 jobs ETL diarios (10 DPU)   ~$210                  │
+│ - Athena: 100 consultas/día (5 GB c/u)              ~$75                   │
+│ - Redshift: 32 RPU, 6 hrs/día                       ~$2,160                │
+│ - Lambda: 10M invocaciones                           ~$23                   │
+│ - API Gateway: 10M requests (HTTP API)              ~$10                   │
+│ - EKS: 1 cluster + 3x m5.large                     ~$352                  │
+│ - SageMaker: notebooks + training semanal (GPU)     ~$77                   │
+│ - Bedrock: 5M tokens/día (Claude Sonnet)            ~$1,350                │
+│ ─────────────────────────────────────────────────────────────               │
+│ TOTAL APROXIMADO:                                    ~$4,441/mes           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ESCENARIO 3: PRODUCCIÓN INTENSIVA                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ - S3: 20 TB datos                                    ~$1,840                │
+│ - Glue: Jobs ETL continuos (20 DPU, 12h/día)       ~$3,168                │
+│ - Athena: 500 consultas/día (20 GB c/u)             ~$1,500                │
+│ - Redshift: 32 RPU, 24/7                            ~$8,640                │
+│ - Lambda: 50M invocaciones                           ~$427                  │
+│ - API Gateway: 100M requests (HTTP API)             ~$100                  │
+│ - EKS: 1 cluster + 10x m5.2xlarge                   ~$2,873                │
+│ - SageMaker: multiple endpoints + training          ~$3,200                │
+│ - Bedrock: 20M tokens/día (Claude Sonnet)           ~$5,400                │
+│ ─────────────────────────────────────────────────────────────               │
+│ TOTAL APROXIMADO:                                    ~$27,148/mes          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+ESCENARIO 4: PRUEBAS UAT (User Acceptance Testing)
+================================================================================
+
+Las pruebas UAT requieren un ambiente que replique producción pero con uso
+limitado en tiempo (típicamente 2-4 semanas de sprint). Se recomienda:
+- Infraestructura idéntica a producción pero con menor capacidad
+- Datos de prueba (subset de producción, 10-20% del volumen)
+- Encender recursos solo durante horario de pruebas (8-10 hrs/día laborables)
+- Destruir el ambiente al finalizar el ciclo de pruebas
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ ESCENARIO UAT - CICLO DE 4 SEMANAS (20 días laborables)                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ INFRAESTRUCTURA BASE (fija durante el ciclo):                               │
+│ ─────────────────────────────────────────────                               │
+│ - S3: 200 GB datos de prueba (subset prod)           ~$18                   │
+│ - Glue Data Catalog                                  ~$0 (gratis)           │
+│ - IAM Roles / Security Groups                        ~$0 (gratis)           │
+│ - CloudWatch Logs (~5 GB ingesta)                    ~$2.50                 │
+│                                                                             │
+│ CÓMPUTO (solo horario laboral 10hrs/día x 20 días = 200 hrs):              │
+│ ─────────────────────────────────────────────────────────────               │
+│ - Redshift Serverless: 8 RPU, 200 hrs activo         ~$600                  │
+│   (8 RPU x $0.375/RPU-hr x 200 hrs)                                        │
+│ - EKS: 1 cluster + 2x t3.large (200 hrs)            ~$103                  │
+│   (cluster $0.10/hr x 200 + 2x $0.1152/hr x 200)                           │
+│ - Lambda: 2M invocaciones (pruebas de integración)  ~$0.40                  │
+│ - API Gateway: 2M requests (pruebas de API)         ~$2                    │
+│                                                                             │
+│ ETL Y CONSULTAS:                                                            │
+│ ─────────────────                                                           │
+│ - Glue Crawlers: 2 ejecuciones/día (10 min, 2 DPU)  ~$6                    │
+│   (2 crawlers x 20 días x 0.17hr x 2 DPU x $0.44)                          │
+│ - Glue Jobs: 3 jobs/día (20 min, 5 DPU)             ~$44                   │
+│   (3 jobs x 20 días x 0.33hr x 5 DPU x $0.44)                              │
+│ - Athena: 50 consultas/día (2 GB c/u)               ~$10                   │
+│   (50 x 20 días x 2 GB x $5/TB)                                            │
+│                                                                             │
+│ IA / ML (validación de modelos):                                            │
+│ ─────────────────────────────────                                           │
+│ - SageMaker: 1 notebook t3.med (8h/día x 20 días)   ~$8                    │
+│ - SageMaker: 1 endpoint ml.m5.large (200 hrs)       ~$27                   │
+│ - Bedrock: 1M tokens/día x 20 días (Haiku)          ~$7.50                 │
+│                                                                             │
+│ HERRAMIENTAS DE TESTING:                                                    │
+│ ─────────────────────────                                                   │
+│ - Lambda (test runners, validadores): incluido arriba                       │
+│ - CloudWatch Dashboards (monitoreo UAT): ~$3/dashboard x 2                  │
+│ - SNS notificaciones de errores: ~$0.50                                     │
+│ - Step Functions (orquestación de pruebas): ~$2.50                          │
+│   (100 ejecuciones/día x 20 días x $0.025/1K transiciones)                  │
+│                                                                             │
+│ ─────────────────────────────────────────────────────────────               │
+│ SUBTOTAL CICLO UAT (4 semanas):                      ~$834                  │
+│                                                                             │
+│ + Buffer imprevistos (15%):                          ~$125                  │
+│ ─────────────────────────────────────────────────────────────               │
+│ TOTAL ESTIMADO CICLO UAT:                            ~$959                  │
+│                                                                             │
+│ Costo por semana:                                    ~$240/semana           │
+│ Costo por día laborable:                             ~$48/día              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ COMPARATIVA: UAT vs PRODUCCIÓN                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│ ┌──────────────────────┬──────────────────┬──────────────────┬───────────┐ │
+│ │ Servicio             │ UAT/mes          │ Producción/mes   │ Ahorro    │ │
+│ ├──────────────────────┼──────────────────┼──────────────────┼───────────┤ │
+│ │ S3                   │ $18              │ $184             │ 90%       │ │
+│ │ Redshift             │ $600             │ $2,160           │ 72%       │ │
+│ │ Glue                 │ $50              │ $210             │ 76%       │ │
+│ │ Athena               │ $10              │ $75              │ 87%       │ │
+│ │ Lambda               │ $0.40            │ $23              │ 98%       │ │
+│ │ API Gateway          │ $2               │ $10              │ 80%       │ │
+│ │ EKS                  │ $103             │ $352             │ 71%       │ │
+│ │ SageMaker            │ $35              │ $77              │ 55%       │ │
+│ │ Bedrock              │ $7.50            │ $1,350           │ 99%       │ │
+│ ├──────────────────────┼──────────────────┼──────────────────┼───────────┤ │
+│ │ TOTAL                │ ~$959            │ ~$4,441          │ 78%       │ │
+│ └──────────────────────┴──────────────────┴──────────────────┴───────────┘ │
+│                                                                             │
+│ El ambiente UAT cuesta ~78% menos que producción gracias a:                 │
+│ - Menor volumen de datos (subset de 10-20%)                                 │
+│ - Menor capacidad de cómputo (8 RPU vs 32 RPU)                             │
+│ - Solo horario laboral (200 hrs vs 720 hrs/mes)                             │
+│ - Uso mínimo de Bedrock (solo validación, no tráfico real)                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+RECOMENDACIONES PARA UAT:
+─────────────────────────
+1. Usar Terraform workspaces para separar UAT de producción:
+   terraform workspace new uat
+   terraform workspace select uat
+
+2. Variables específicas para UAT (terraform.tfvars.uat):
+   environment          = "uat"
+   redshift_base_capacity = 8    (en vez de 32)
+
+3. Programar encendido/apagado con EventBridge + Lambda:
+   - Encender Redshift a las 8:00 AM
+   - Apagar (pause) a las 6:00 PM
+   - No ejecutar fines de semana
+
+4. Datos de prueba:
+   - Usar aws s3 sync con --exclude para copiar subset
+   - Anonimizar datos sensibles con Glue DataBrew
+   - Mantener volumen en 10-20% de producción
+
+5. Al finalizar ciclo UAT:
+   terraform workspace select uat
+   terraform destroy  → Elimina todo, costo cae a $0
+
+================================================================================
+TIPS PARA REDUCIR COSTOS
+================================================================================
+
+1. S3: Usar lifecycle rules para mover datos viejos a Glacier ($0.004/GB)
+2. Athena: Convertir datos a Parquet + particionar (ahorro 30-90%)
+3. Redshift: Habilitar auto-pause (no cobra cuando está idle)
+4. Lambda: Usar ARM/Graviton2 (20% más barato)
+5. EKS: Usar Spot Instances para nodos (ahorro 60-90%)
+6. Glue: Usar auto-scaling de DPUs y job bookmarks
+7. Bedrock: Usar batch inference (50% descuento) cuando no es real-time
+8. SageMaker: Apagar notebooks fuera de horario, usar Spot Training
+9. General: Usar Reserved Capacity / Savings Plans (ahorro 20-40%)
+10. API Gateway: Usar HTTP APIs en vez de REST APIs (70% más barato)
+
+================================================================================
+SERVICIOS GRATUITOS (SIN COSTO)
+================================================================================
+
+- IAM Roles y Policies
+- Security Groups
+- Glue Data Catalog (primeros 1M objetos)
+- Lambda Free Tier (1M requests + 400K GB-seconds/mes)
+- API Gateway Free Tier (1M requests/mes, primeros 12 meses)
+
+================================================================================
+FUENTES
+================================================================================
+
+- https://aws.amazon.com/s3/pricing/
+- https://aws.amazon.com/glue/pricing/
+- https://aws.amazon.com/athena/pricing/
+- https://aws.amazon.com/redshift/pricing/
+- https://aws.amazon.com/lambda/pricing/
+- https://aws.amazon.com/api-gateway/pricing/
+- https://aws.amazon.com/eks/pricing/
+- https://aws.amazon.com/sagemaker-ai/pricing/
+- https://aws.amazon.com/bedrock/pricing/
+
+Precios consultados: julio 2025 (región us-east-1).
+Los precios pueden variar por región y están sujetos a cambio por AWS.
+================================================================================
