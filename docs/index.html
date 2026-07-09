@@ -1,31 +1,93 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Data Lake AWS - Arquitectura y Costos</title>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
     <style>
+        :root[data-theme="light"] {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --bg-card: #f8fafc;
+            --bg-header: linear-gradient(135deg, #f1f5f9 0%, #ffffff 100%);
+            --text-primary: #1e293b;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --accent: #0284c7;
+            --border: #e2e8f0;
+            --border-hover: #0284c7;
+            --input-bg: #ffffff;
+            --input-border: #cbd5e1;
+            --code-bg: #e2e8f0;
+            --green: #16a34a;
+            --green-bg: #f0fdf4;
+            --yellow: #b45309;
+            --yellow-bg: #f1f5f9;
+            --red: #dc2626;
+            --red-bg: #fef2f2;
+            --purple: #7c3aed;
+            --purple-bg: #f5f3ff;
+            --cyan: #0891b2;
+            --cyan-bg: #f0f9ff;
+            --mermaid-theme: default;
+        }
+        :root[data-theme="dark"] {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --bg-header: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            --text-primary: #e2e8f0;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent: #38bdf8;
+            --border: #334155;
+            --border-hover: #38bdf8;
+            --input-bg: #0f172a;
+            --input-border: #475569;
+            --code-bg: #334155;
+            --green: #4ade80;
+            --green-bg: #052e16;
+            --yellow: #facc15;
+            --yellow-bg: #422006;
+            --red: #f87171;
+            --red-bg: #450a0a;
+            --purple: #a78bfa;
+            --purple-bg: #1e1b4b;
+            --cyan: #67e8f9;
+            --cyan-bg: #083344;
+            --mermaid-theme: dark;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #0f172a;
-            color: #e2e8f0;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             line-height: 1.6;
+            transition: background 0.3s, color 0.3s;
         }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
         header {
             text-align: center;
             padding: 40px 20px;
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            border-bottom: 1px solid #334155;
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border);
+            position: relative;
         }
-        header h1 { font-size: 2.2rem; color: #38bdf8; margin-bottom: 8px; }
-        header p { color: #94a3b8; font-size: 1.1rem; }
+        header h1 { font-size: 2.2rem; color: var(--accent); margin-bottom: 8px; }
+        header p { color: var(--text-secondary); font-size: 1.1rem; }
+        .theme-toggle {
+            position: absolute; top: 20px; right: 20px;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: 30px; padding: 8px 16px; cursor: pointer;
+            font-size: 1.2rem; transition: all 0.3s;
+        }
+        .theme-toggle:hover { border-color: var(--accent); }
 </style>
 </head>
 <body>
 <header>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">🌙</button>
     <h1>🏗️ Data Lake AWS - Arquitectura</h1>
     <p>Visualización de infraestructura, flujo de datos y costos estimados</p>
 </header>
@@ -57,6 +119,7 @@ graph LR
         EKS["EKS"]
         LANDING["S3 Landing"]
         MSK["MSK Kafka"]
+        ECR_EKS["ECR: eks-services, eks-jobs, eks-ingestion"]
     end
 
     subgraph Lakehouse["Data Lakehouse"]
@@ -75,6 +138,7 @@ graph LR
     subgraph AI["IA Generativa / ML"]
         SM["SageMaker Studio + Training + Endpoints"]
         BR["Bedrock FM + KB + Agents"]
+        ECR_AI["ECR: ai-training, ai-inference, ai-agents, ai-pipelines"]
     end
 
     subgraph Serving["Salida"]
@@ -85,6 +149,26 @@ graph LR
     subgraph Observability["Observabilidad"]
         CW["CloudWatch Dashboards + Alarmas"]
         SNS["SNS Alertas"]
+    end
+
+    subgraph Security["Seguridad"]
+        KMS["KMS Encriptacion"]
+        WAF["WAF API Protection"]
+        GD["GuardDuty Amenazas"]
+        CT["CloudTrail Auditoria"]
+        CFG["AWS Config Compliance"]
+    end
+
+    subgraph CostCtrl["Control de Costos"]
+        BUDGETS["AWS Budgets por servicio"]
+        REMEDIATION["Lambda Remediacion - Apagar/Throttle"]
+    end
+
+    subgraph Accounts["Multi-Cuenta"]
+        SANDBOX_ACC["Sandbox"]
+        UAT_ACC["UAT"]
+        PREPROD_ACC["PreProd"]
+        PROD_ACC["Produccion"]
     end
 
     SRC1 & SRC3 --> API
@@ -104,6 +188,16 @@ graph LR
     APOUT --> APPS
     GLUE & SM & BR & APOUT & MSK --> CW
     CW --> SNS
+    WAF --> APOUT
+    KMS --> BRONZE & SILVER & GOLD
+    CT --> BRONZE & SILVER & GOLD
+    GD --> CW
+    ECR_EKS --> EKS
+    ECR_AI --> SM
+    CW --> BUDGETS
+    BUDGETS --> REMEDIATION
+    REMEDIATION --> REDSHIFT
+    REMEDIATION --> APOUT
         </div>
 
         <h3>Descripcion de cada capa</h3>
@@ -151,15 +245,58 @@ graph LR
             </div>
             <div class="spec-card">
                 <h4>7. Observabilidad</h4>
-                <p><strong>CloudWatch Dashboards (6 tableros):</strong><br>
+                <p><strong>CloudWatch Dashboards (7 tableros):</strong><br>
                 - General: Vista ejecutiva de salud del data lake (S3, Lambda errores, Redshift queries).<br>
                 - Ingesta: Landing processor, MSK Kafka throughput y consumer lag.<br>
                 - ETL: Glue jobs duracion, bytes procesados, crawlers, tablas en catalogo.<br>
                 - Analitica: Athena datos escaneados y tiempos, Redshift RPUs y conexiones.<br>
                 - IA/ML: SageMaker invocaciones y latencia, Bedrock tokens y modelos.<br>
-                - Serving: API Gateway requests, latencia p99, errores 4xx/5xx.<br><br>
-                <strong>Alarmas criticas (SNS):</strong> Lambda errores >5 en 10min, Glue jobs fallidos, Redshift >80% capacidad, API 5xx >10 en 10min, MSK disco >80%.<br>
-                <strong>Logs centralizados:</strong> Todos los Lambda, Glue jobs y MSK con retención de 30 dias.</p>
+                - Serving: API Gateway requests, latencia p99, errores 4xx/5xx.<br>
+                - Costos: Gasto total estimado, gasto por servicio, RPU-horas, tokens Bedrock, invocaciones Lambda, presupuestos configurados, remediaciones ejecutadas.<br><br>
+                <strong>Alarmas criticas (SNS):</strong> Lambda errores >5 en 10min, Glue jobs fallidos, Redshift >80% capacidad, API 5xx >10 en 10min, MSK disco >80%, budget excedido.<br>
+                <strong>Logs centralizados:</strong> Todos los Lambda, Glue jobs y MSK con retencion de 30 dias.</p>
+            </div>
+            <div class="spec-card">
+                <h4>8. Seguridad</h4>
+                <p><strong>KMS (Key Management Service):</strong> Llave de encriptacion gestionada con rotacion automatica anual. Encripta datos en S3, Redshift, Glue. Todos los servicios del data lake tienen acceso.<br>
+                <strong>WAF (Web Application Firewall):</strong> Protege API Gateway contra ataques. Rate limiting (2000 req/5min por IP), bloqueo SQL Injection, y reglas comunes de OWASP.<br>
+                <strong>GuardDuty:</strong> Deteccion continua de amenazas. Monitorea S3 (accesos anomalos), Kubernetes (audit logs), y malware en EBS.<br>
+                <strong>CloudTrail:</strong> Auditoria completa de todas las acciones API en la cuenta. Logs almacenados en S3 con validacion de integridad.<br>
+                <strong>AWS Config:</strong> Evalua compliance de la infraestructura. Reglas: S3 debe tener encriptacion, S3 no debe ser publico. Registra cambios en configuracion.</p>
+            </div>
+            <div class="spec-card">
+                <h4>9. ECR - Repositorios de Imagenes</h4>
+                <p><strong>Kubernetes (EKS):</strong><br>
+                - eks-services: Microservicios del data lake (APIs internas, workers)<br>
+                - eks-jobs: Jobs batch de procesamiento y extraccion<br>
+                - eks-ingestion: Contenedores de ingesta de datos<br><br>
+                <strong>Agentes IA / ML:</strong><br>
+                - ai-training: Imagenes custom para entrenamiento de modelos (PyTorch, TensorFlow)<br>
+                - ai-inference: Contenedores optimizados para servir modelos en SageMaker endpoints<br>
+                - ai-agents: Agentes autonomos que combinan modelos + herramientas + memoria<br>
+                - ai-pipelines: Pipelines de ML (feature engineering, evaluacion, deploy)<br><br>
+                <strong>ETL:</strong><br>
+                - etl-custom: Contenedores Spark/Python custom para Glue jobs especializados<br><br>
+                <strong>Seguridad:</strong> Todas las imagenes se escanean al push (vulnerabilidades), encriptadas con KMS, y lifecycle policy elimina imagenes sin tag a los 7 dias.</p>
+            </div>
+            <div class="spec-card">
+                <h4>10. Control de Costos</h4>
+                <p><strong>AWS Budgets:</strong> Presupuestos mensuales por servicio (Total, Redshift, Lambda+API, Storage). Alertas al 50%, 80% y 100% del budget via SNS.<br>
+                <strong>Lambda de Remediacion:</strong> Se dispara automaticamente cuando se excede el budget. Acciones disponibles:<br>
+                - pause_redshift: Pone capacity a 0 (Redshift deja de cobrar)<br>
+                - throttle_lambda: Reduce concurrencia de Lambdas de serving a 1<br>
+                - stop_all_non_essential: Pausa Redshift + detiene Lambdas de serving<br>
+                - notify: Solo notifica sin actuar<br><br>
+                <strong>Alarmas de costo:</strong> Monitorean el gasto estimado cada 6 horas. Si Redshift o Lambda superan 90% del budget, se dispara la remediacion.</p>
+            </div>
+            <div class="spec-card">
+                <h4>11. Multi-Cuenta (AWS Organizations)</h4>
+                <p>Estrategia de cuentas separadas para aislamiento total entre ambientes. Cada cuenta tiene su propia facturacion, IAM, y red. Habilitado con <code>enable_multi_account = true</code>.<br><br>
+                <strong>Sandbox:</strong> Experimentacion libre, SCP restringe a 1 sola region, datos efimeros.<br>
+                <strong>UAT:</strong> Pruebas de aceptacion con datos anonimizados de produccion.<br>
+                <strong>PreProd:</strong> Replica exacta de produccion para validacion final antes de deploy.<br>
+                <strong>Produccion:</strong> Ambiente productivo con todos los controles de seguridad y compliance.<br><br>
+                <strong>SCP (Service Control Policies):</strong> Politicas que restringen lo que cada cuenta puede hacer (ej: sandbox solo puede usar us-east-1).</p>
             </div>
         </div>
     </section>
@@ -503,6 +640,18 @@ graph TD
                 <p class="calc-rate">Dashboard $3/mes, Logs $0.50/GB ingesta + $0.03/GB storage, Alarma $0.10/mes</p>
                 <p class="calc-result" id="cw_cost">$23.50</p>
             </div>
+            <div class="calc-card">
+                <div class="calc-icon">🔒</div>
+                <h3>Seguridad</h3>
+                <label>KMS requests/mes (millones):</label>
+                <input type="number" id="kms_millions" value="1" min="0" step="0.1" onchange="calcCosts()">
+                <label>WAF requests/mes (millones):</label>
+                <input type="number" id="waf_millions" value="10" min="0" onchange="calcCosts()">
+                <label>CloudTrail eventos/mes (millones):</label>
+                <input type="number" id="ct_millions" value="5" min="0" onchange="calcCosts()">
+                <p class="calc-rate">KMS $0.03/10K req, WAF $5/ACL + $0.60/1M req, Trail $2/100K eventos, GuardDuty ~$4/mes base, Config $2/regla</p>
+                <p class="calc-result" id="sec_cost">$25.00</p>
+            </div>
         </div>
 
         <div class="total-banner">
@@ -821,7 +970,36 @@ graph TD
         </div>
 
         <div class="detail-section">
-            <h3>11. Servicios Gratuitos</h3>
+            <h3>11. Seguridad (KMS, WAF, GuardDuty, CloudTrail, Config)</h3>
+            <table class="detail-table">
+                <thead><tr><th>Servicio</th><th>Concepto</th><th>Precio</th></tr></thead>
+                <tbody>
+                    <tr><td>KMS</td><td>Llave gestionada</td><td>$1.00 / llave / mes</td></tr>
+                    <tr><td>KMS</td><td>Requests</td><td>$0.03 / 10,000 requests</td></tr>
+                    <tr><td>WAF</td><td>Web ACL</td><td>$5.00 / ACL / mes</td></tr>
+                    <tr><td>WAF</td><td>Reglas</td><td>$1.00 / regla / mes</td></tr>
+                    <tr><td>WAF</td><td>Requests</td><td>$0.60 / 1M requests</td></tr>
+                    <tr><td>GuardDuty</td><td>Analisis CloudTrail</td><td>$4.00 / 1M eventos (primeros)</td></tr>
+                    <tr><td>GuardDuty</td><td>Analisis S3</td><td>$0.80 / 1M eventos</td></tr>
+                    <tr><td>CloudTrail</td><td>Management events (1er trail)</td><td>GRATIS</td></tr>
+                    <tr><td>CloudTrail</td><td>Data events</td><td>$0.10 / 100K eventos</td></tr>
+                    <tr><td>AWS Config</td><td>Regla de evaluacion</td><td>$2.00 / regla activa / mes</td></tr>
+                    <tr><td>AWS Config</td><td>Items registrados</td><td>$0.003 / item</td></tr>
+                </tbody>
+            </table>
+            <table class="detail-table">
+                <thead><tr><th>Escenario</th><th>Costo/mes</th></tr></thead>
+                <tbody>
+                    <tr><td>Basico: 1 KMS + WAF 3 reglas + GuardDuty + Trail + 2 Config rules</td><td>~$25</td></tr>
+                    <tr><td>Moderado: 1 KMS + WAF 5 reglas + GuardDuty + Trail data events + 5 Config rules</td><td>~$60</td></tr>
+                    <tr><td>Enterprise: 3 KMS + WAF 10 reglas + GuardDuty + Trail + 10 Config rules + SecurityHub</td><td>~$150+</td></tr>
+                </tbody>
+            </table>
+            <p class="detail-tip">La seguridad es relativamente barata comparada con el riesgo. GuardDuty + CloudTrail + Config son esenciales para compliance.</p>
+        </div>
+
+        <div class="detail-section">
+            <h3>12. Servicios Gratuitos</h3>
             <table class="detail-table">
                 <thead><tr><th>Servicio</th><th>Costo</th></tr></thead>
                 <tbody>
@@ -891,6 +1069,7 @@ graph TB
         SERVING["outputs_serving.tf - API GW, Lambdas serving, SageMaker Domain"]
         SANDBOX["sandbox.tf - Ambiente aislado opcional"]
         OBS["observability.tf - Dashboards, alarmas, logs"]
+        SEC["security.tf - KMS, WAF, GuardDuty, CloudTrail, Config"]
         VARS["variables.tf - Inputs"]
         OUTPUTS["outputs.tf - ARNs y endpoints"]
         LOCALS["locals.tf - Tags comunes"]
@@ -931,7 +1110,11 @@ graph TB
                     <tr><td><code>streaming.tf</code></td><td>MSK Kafka cluster (3 brokers), Security Group MSK, CloudWatch Log Group</td></tr>
                     <tr><td><code>outputs_serving.tf</code></td><td>API Gateway REST, Lambda serving-gold, Lambda serving-ml, SageMaker Domain (Studio Unified)</td></tr>
                     <tr><td><code>sandbox.tf</code></td><td>S3 sandbox (bronze/silver/gold), Glue DB + Crawler, Athena workgroup con limite, Redshift 4 RPU, SageMaker notebook. Todo condicional con enable_sandbox = true</td></tr>
-                    <tr><td><code>observability.tf</code></td><td>6 CloudWatch Dashboards (General, Ingesta, ETL, Analitica, IA/ML, Serving), 5 Alarmas criticas, SNS Topics, Log Groups centralizados</td></tr>
+                    <tr><td><code>observability.tf</code></td><td>7 CloudWatch Dashboards (General, Ingesta, ETL, Analitica, IA/ML, Serving, Costos), 5 Alarmas criticas, SNS Topics, Log Groups centralizados</td></tr>
+                    <tr><td><code>security.tf</code></td><td>KMS key + alias, WAF Web ACL (rate limit + SQLi + OWASP), GuardDuty detector, CloudTrail + S3 bucket auditoria, AWS Config recorder + 2 reglas compliance, IAM role Config</td></tr>
+                    <tr><td><code>ecr.tf</code></td><td>8 repositorios ECR (eks-services, eks-jobs, eks-ingestion, ai-training, ai-inference, ai-agents, ai-pipelines, etl-custom) + lifecycle policies + scan on push + KMS</td></tr>
+                    <tr><td><code>cost_control.tf</code></td><td>4 AWS Budgets (total, redshift, lambda+api, storage), Lambda remediacion (pausa/throttle), alarmas de costo, IAM role remediacion</td></tr>
+                    <tr><td><code>accounts.tf</code></td><td>AWS Organizations, OU, 4 cuentas (sandbox, uat, preprod, prod), SCP region restrict. Condicional con enable_multi_account = true</td></tr>
                     <tr><td><code>iam.tf</code></td><td>glue_role, redshift_role, athena_role + politicas S3/Glue/Athena</td></tr>
                     <tr><td><code>iam_ai.tf</code></td><td>sagemaker_role, bedrock_role + S3 Artifacts bucket + politicas S3/Glue/ECR/Bedrock</td></tr>
                     <tr><td><code>iam_compute.tf</code></td><td>lambda_role, apigw_role, eks_cluster_role, eks_node_role + politicas S3/Glue/Athena/SQS/SNS/VPC/MSK/SageMaker</td></tr>
@@ -945,10 +1128,15 @@ graph TB
         <h3 style="margin-top:30px;">Comandos</h3>
         <div class="commands">
             <code>terraform init</code> - Descarga providers (aws + archive)<br>
+            <code>terraform validate</code> - Verifica sintaxis y configuracion<br>
+            <code>terraform fmt</code> - Formatea archivos .tf<br>
             <code>terraform plan</code> - Muestra cambios pendientes<br>
             <code>terraform apply</code> - Aplica la infraestructura<br>
+            <code>terraform apply -var="enable_sandbox=true"</code> - Aplica con sandbox<br>
             <code>terraform destroy</code> - Elimina todo<br>
             <code>terraform workspace new uat</code> - Crear ambiente UAT separado<br>
+            <code>terraform state list</code> - Lista recursos creados<br>
+            <code>terraform output</code> - Muestra ARNs y endpoints<br>
             <code>terraform graph | dot -Tsvg > graph.svg</code> - Grafo de dependencias
         </div>
     </section>
@@ -957,26 +1145,26 @@ graph TB
 <style>
     .tabs {
         display: flex; gap: 8px; margin: 30px 0 20px;
-        flex-wrap: wrap; border-bottom: 2px solid #334155; padding-bottom: 10px;
+        flex-wrap: wrap; border-bottom: 2px solid var(--border); padding-bottom: 10px;
     }
     .tab {
         padding: 10px 20px; border: none; border-radius: 8px 8px 0 0;
-        background: #1e293b; color: #94a3b8; cursor: pointer;
+        background: var(--bg-card); color: var(--text-secondary); cursor: pointer;
         font-size: 0.95rem; font-weight: 500; transition: all 0.2s;
     }
-    .tab:hover { background: #334155; color: #e2e8f0; }
-    .tab.active { background: #38bdf8; color: #0f172a; }
+    .tab:hover { background: var(--border); color: var(--text-primary); }
+    .tab.active { background: var(--accent); color: #ffffff; }
     .tab-content { display: none; animation: fadeIn 0.3s; }
     .tab-content.active { display: block; }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .tab-content h2 {
-        font-size: 1.5rem; color: #38bdf8; margin: 20px 0 15px;
-        border-bottom: 1px solid #334155; padding-bottom: 10px;
+        font-size: 1.5rem; color: var(--accent); margin: 20px 0 15px;
+        border-bottom: 1px solid var(--border); padding-bottom: 10px;
     }
-    .tab-content h3 { color: #f1f5f9; margin: 15px 0 10px; }
+    .tab-content h3 { color: var(--text-primary); margin: 15px 0 10px; }
     .mermaid {
-        background: #1e293b; border-radius: 12px; padding: 30px;
-        margin: 15px 0; border: 1px solid #334155;
+        background: var(--bg-card); border-radius: 12px; padding: 30px;
+        margin: 15px 0; border: 1px solid var(--border);
     }
     .costs-grid {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -996,31 +1184,31 @@ graph TB
         gap: 16px; margin: 20px 0;
     }
     .calc-card {
-        background: #1e293b; border-radius: 12px; padding: 18px;
-        border: 1px solid #334155; transition: border-color 0.2s;
+        background: var(--bg-card); border-radius: 12px; padding: 18px;
+        border: 1px solid var(--border); transition: border-color 0.2s;
     }
-    .calc-card:hover { border-color: #38bdf8; }
+    .calc-card:hover { border-color: var(--accent); }
     .calc-icon { font-size: 1.8rem; margin-bottom: 6px; }
-    .calc-card h3 { color: #f1f5f9; font-size: 0.95rem; margin-bottom: 10px; }
-    .calc-card label { display: block; color: #94a3b8; font-size: 0.78rem; margin-top: 8px; }
+    .calc-card h3 { color: var(--text-primary); font-size: 0.95rem; margin-bottom: 10px; }
+    .calc-card label { display: block; color: var(--text-secondary); font-size: 0.78rem; margin-top: 8px; }
     .calc-card input, .calc-card select {
         width: 100%; padding: 6px 10px; margin-top: 3px;
-        background: #0f172a; border: 1px solid #475569; border-radius: 6px;
-        color: #e2e8f0; font-size: 0.9rem;
+        background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 6px;
+        color: var(--text-primary); font-size: 0.9rem;
     }
-    .calc-card input:focus, .calc-card select:focus { border-color: #38bdf8; outline: none; }
-    .calc-rate { color: #64748b; font-size: 0.75rem; margin-top: 8px; }
+    .calc-card input:focus, .calc-card select:focus { border-color: var(--accent); outline: none; }
+    .calc-rate { color: var(--text-muted); font-size: 0.75rem; margin-top: 8px; }
     .calc-result {
-        color: #4ade80; font-size: 1.2rem; font-weight: 700; margin-top: 6px;
-        padding: 4px 0; border-top: 1px solid #334155;
+        color: var(--green); font-size: 1.2rem; font-weight: 700; margin-top: 6px;
+        padding: 4px 0; border-top: 1px solid var(--border);
     }
     .total-banner {
-        background: linear-gradient(135deg, #1e3a5f, #0f172a); border: 2px solid #38bdf8;
+        background: var(--bg-card); border: 2px solid var(--accent);
         border-radius: 12px; padding: 20px 30px; margin: 25px 0;
         display: flex; justify-content: space-between; align-items: center;
     }
-    .total-banner h3 { color: #94a3b8; font-size: 1rem; }
-    .total-price { color: #38bdf8; font-size: 2rem; font-weight: 700; }
+    .total-banner h3 { color: var(--text-secondary); font-size: 1rem; }
+    .total-price { color: var(--accent); font-size: 2rem; font-weight: 700; }
 </style>
 
 <style>
@@ -1030,51 +1218,51 @@ graph TB
     }
     .scenario {
         border-radius: 12px; padding: 20px;
-        border: 1px solid #334155; background: #1e293b;
+        border: 1px solid var(--border); background: var(--bg-card);
     }
     .scenario h4 { font-size: 1.1rem; margin-bottom: 8px; }
     .scenario-price {
         display: inline-block; font-size: 1.4rem; font-weight: 700;
         margin-bottom: 12px; padding: 4px 12px; border-radius: 6px;
     }
-    .scenario.dev .scenario-price { color: #4ade80; background: #052e16; }
-    .scenario.sandbox .scenario-price { color: #67e8f9; background: #083344; }
-    .scenario.uat .scenario-price { color: #a78bfa; background: #1e1b4b; }
-    .scenario.prod .scenario-price { color: #facc15; background: #422006; }
-    .scenario.heavy .scenario-price { color: #f87171; background: #450a0a; }
+    .scenario.dev .scenario-price { color: var(--green); background: var(--green-bg); }
+    .scenario.sandbox .scenario-price { color: var(--cyan); background: var(--cyan-bg); }
+    .scenario.uat .scenario-price { color: var(--purple); background: var(--purple-bg); }
+    .scenario.prod .scenario-price { color: var(--yellow); background: var(--yellow-bg); }
+    .scenario.heavy .scenario-price { color: var(--red); background: var(--red-bg); }
     .scenario ul { list-style: none; padding: 0; }
     .scenario li {
-        padding: 4px 0; color: #94a3b8; font-size: 0.9rem;
-        border-bottom: 1px solid #1e293b;
+        padding: 4px 0; color: var(--text-secondary); font-size: 0.9rem;
+        border-bottom: 1px solid var(--bg-primary);
     }
-    .scenario li::before { content: "→ "; color: #64748b; }
+    .scenario li::before { content: "→ "; color: var(--text-muted); }
     .commands {
-        background: #1e293b; border-radius: 12px; padding: 20px;
-        border: 1px solid #334155; font-family: 'Fira Code', monospace;
+        background: var(--bg-card); border-radius: 12px; padding: 20px;
+        border: 1px solid var(--border); font-family: 'Fira Code', monospace;
         font-size: 0.9rem; line-height: 2;
     }
     .commands code {
-        background: #334155; padding: 3px 8px; border-radius: 4px;
-        color: #38bdf8;
+        background: var(--code-bg); padding: 3px 8px; border-radius: 4px;
+        color: var(--accent);
     }
     .iam-detail-grid {
         display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
         gap: 16px; margin: 20px 0;
     }
     .iam-card {
-        background: #1e293b; border-radius: 12px; padding: 18px;
-        border: 1px solid #334155; transition: border-color 0.2s;
+        background: var(--bg-card); border-radius: 12px; padding: 18px;
+        border: 1px solid var(--border); transition: border-color 0.2s;
     }
-    .iam-card:hover { border-color: #38bdf8; }
-    .iam-card h4 { color: #38bdf8; margin-bottom: 10px; font-size: 1rem; }
+    .iam-card:hover { border-color: var(--accent); }
+    .iam-card h4 { color: var(--accent); margin-bottom: 10px; font-size: 1rem; }
     .iam-card ul { list-style: none; padding: 0; }
     .iam-card li {
-        padding: 4px 0; color: #94a3b8; font-size: 0.82rem;
-        border-bottom: 1px solid #0f172a;
+        padding: 4px 0; color: var(--text-secondary); font-size: 0.82rem;
+        border-bottom: 1px solid var(--bg-primary);
     }
     .iam-card li:last-child { border-bottom: none; }
     .policy-managed {
-        background: #1e3a5f; color: #7dd3fc; padding: 2px 6px;
+        background: var(--cyan-bg); color: var(--cyan); padding: 2px 6px;
         border-radius: 3px; font-size: 0.78rem;
     }
     .spec-grid {
@@ -1082,26 +1270,26 @@ graph TB
         gap: 16px; margin: 20px 0;
     }
     .spec-card {
-        background: #1e293b; border-radius: 12px; padding: 20px;
-        border: 1px solid #334155; transition: border-color 0.2s;
+        background: var(--bg-card); border-radius: 12px; padding: 20px;
+        border: 1px solid var(--border); transition: border-color 0.2s;
     }
-    .spec-card:hover { border-color: #38bdf8; }
+    .spec-card:hover { border-color: var(--accent); }
     .spec-card h4 {
-        color: #38bdf8; margin-bottom: 10px; font-size: 1rem;
-        border-bottom: 1px solid #334155; padding-bottom: 8px;
+        color: var(--accent); margin-bottom: 10px; font-size: 1rem;
+        border-bottom: 1px solid var(--border); padding-bottom: 8px;
     }
-    .spec-card p { color: #94a3b8; font-size: 0.88rem; line-height: 1.7; }
-    .spec-card strong { color: #e2e8f0; }
+    .spec-card p { color: var(--text-secondary); font-size: 0.88rem; line-height: 1.7; }
+    .spec-card strong { color: var(--text-primary); }
     .fullscreen-btn {
-        background: #334155; color: #94a3b8; border: 1px solid #475569;
+        background: var(--bg-card); color: var(--text-secondary); border: 1px solid var(--border);
         border-radius: 6px; padding: 4px 12px; cursor: pointer;
         font-size: 0.8rem; margin-left: 12px; transition: all 0.2s;
         vertical-align: middle;
     }
-    .fullscreen-btn:hover { background: #38bdf8; color: #0f172a; }
+    .fullscreen-btn:hover { background: var(--accent); color: #ffffff; }
     .fullscreen-overlay {
         display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        background: #0f172a; z-index: 9999; overflow: auto; padding: 40px;
+        background: var(--bg-primary); z-index: 9999; overflow: auto; padding: 40px;
         flex-direction: column;
     }
     .fullscreen-overlay.active { display: flex; align-items: center; justify-content: center; }
@@ -1119,36 +1307,36 @@ graph TB
     }
     .fullscreen-close:hover { background: #dc2626; }
     .detail-section {
-        background: #1e293b; border-radius: 12px; padding: 20px;
-        margin: 16px 0; border: 1px solid #334155;
+        background: var(--bg-card); border-radius: 12px; padding: 20px;
+        margin: 16px 0; border: 1px solid var(--border);
     }
-    .detail-section h3 { color: #38bdf8; margin-bottom: 12px; font-size: 1.1rem; }
+    .detail-section h3 { color: var(--accent); margin-bottom: 12px; font-size: 1.1rem; }
     .detail-table {
         width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.88rem;
     }
-    .detail-table thead { background: #334155; }
+    .detail-table thead { background: var(--border); }
     .detail-table th {
-        padding: 8px 12px; text-align: left; color: #f1f5f9; font-weight: 600;
+        padding: 8px 12px; text-align: left; color: var(--text-primary); font-weight: 600;
     }
-    .detail-table td { padding: 7px 12px; border-bottom: 1px solid #334155; color: #cbd5e1; }
-    .detail-table tr:hover td { background: #334155; }
-    .detail-table .total-row td { background: #1e3a5f; color: #38bdf8; font-weight: 700; }
+    .detail-table td { padding: 7px 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); }
+    .detail-table tr:hover td { background: var(--border); }
+    .detail-table .total-row td { background: var(--cyan-bg); color: var(--accent); font-weight: 700; }
     .detail-tip {
-        margin-top: 8px; padding: 8px 12px; background: #052e16;
-        border-left: 3px solid #4ade80; border-radius: 4px;
-        color: #86efac; font-size: 0.85rem;
+        margin-top: 8px; padding: 8px 12px; background: var(--green-bg);
+        border-left: 3px solid var(--green); border-radius: 4px;
+        color: var(--green); font-size: 0.85rem;
     }
     .tips-list {
-        padding-left: 20px; color: #94a3b8; font-size: 0.9rem;
+        padding-left: 20px; color: var(--text-secondary); font-size: 0.9rem;
     }
     .tips-list li { padding: 4px 0; }
     .detail-footer {
-        text-align: center; color: #64748b; font-size: 0.8rem;
-        margin-top: 20px; padding-top: 15px; border-top: 1px solid #334155;
+        text-align: center; color: var(--text-muted); font-size: 0.8rem;
+        margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border);
     }
     footer {
         text-align: center; padding: 30px; margin-top: 40px;
-        border-top: 1px solid #334155; color: #64748b; font-size: 0.85rem;
+        border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.85rem;
     }
 </style>
 
@@ -1168,6 +1356,21 @@ graph TB
         });
     });
 
+    // Theme toggle
+    function toggleTheme() {
+        const html = document.documentElement;
+        const current = html.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        document.querySelector('.theme-toggle').textContent = next === 'dark' ? '🌙' : '☀️';
+        localStorage.setItem('theme', next);
+    }
+
+    // Load saved theme
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    document.querySelector('.theme-toggle').textContent = savedTheme === 'dark' ? '🌙' : '☀️';
+
     // Fecha
     document.getElementById('lastUpdate').textContent = new Date().toLocaleDateString('es-ES', {
         year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -1176,18 +1379,7 @@ graph TB
     // Mermaid config
     mermaid.initialize({
         startOnLoad: true,
-        theme: 'dark',
-        themeVariables: {
-            primaryColor: '#38bdf8',
-            primaryTextColor: '#f1f5f9',
-            primaryBorderColor: '#334155',
-            lineColor: '#64748b',
-            secondaryColor: '#1e293b',
-            tertiaryColor: '#0f172a',
-            background: '#1e293b',
-            mainBkg: '#1e293b',
-            nodeBorder: '#38bdf8'
-        }
+        theme: savedTheme === 'dark' ? 'dark' : 'default'
     });
 
     // Fullscreen diagram
@@ -1305,8 +1497,20 @@ graph TB
         const cwCost = (cwDashboards * 3) + (cwLogsGb * 0.50) + (cwLogsGb * 0.03) + (cwAlarms * 0.10);
         document.getElementById('cw_cost').textContent = fmt(cwCost);
 
+        // Seguridad (KMS + WAF + CloudTrail + GuardDuty + Config)
+        const kmsM = parseFloat(document.getElementById('kms_millions').value) || 0;
+        const wafM = parseFloat(document.getElementById('waf_millions').value) || 0;
+        const ctM = parseFloat(document.getElementById('ct_millions').value) || 0;
+        const kmsCost = kmsM * 1000000 / 10000 * 0.03;
+        const wafCost = 5 + (3 * 1) + (wafM * 0.60); // ACL + 3 reglas + requests
+        const ctCost = ctM * 1000000 / 100000 * 2;
+        const guardDutyCost = 4; // base
+        const configCost = 2 * 2; // 2 reglas
+        const secCost = kmsCost + wafCost + ctCost + guardDutyCost + configCost;
+        document.getElementById('sec_cost').textContent = fmt(secCost);
+
         // Total
-        const total = s3cost + glueCost + athenaCost + rsCost + lambdaCost + apigwCost + eksCost + smCost + brCost + mskCost + cwCost;
+        const total = s3cost + glueCost + athenaCost + rsCost + lambdaCost + apigwCost + eksCost + smCost + brCost + mskCost + cwCost + secCost;
         document.getElementById('total_cost').textContent = fmt(total);
     }
 

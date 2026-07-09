@@ -105,3 +105,52 @@ variable "sandbox_athena_scan_limit" {
   type        = number
   default     = 104857600 # 100 MB
 }
+
+# -----------------------------------------------------------------------------
+# Variables Multi-Cuenta
+# -----------------------------------------------------------------------------
+
+variable "enable_multi_account" {
+  description = "Habilitar creación de cuentas separadas via AWS Organizations"
+  type        = bool
+  default     = false
+}
+
+variable "account_emails" {
+  description = "Emails para cada cuenta (requerido si enable_multi_account = true)"
+  type        = map(string)
+  default = {
+    sandbox = "sandbox@example.com"
+    uat     = "uat@example.com"
+    preprod = "preprod@example.com"
+    prod    = "prod@example.com"
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Variables de Control de Costos (Budgets)
+# -----------------------------------------------------------------------------
+
+variable "budget_total" {
+  description = "Presupuesto mensual total en USD"
+  type        = string
+  default     = "5000"
+}
+
+variable "budget_redshift" {
+  description = "Presupuesto mensual para Redshift en USD"
+  type        = string
+  default     = "2000"
+}
+
+variable "budget_lambda_api" {
+  description = "Presupuesto mensual para Lambda + API Gateway en USD"
+  type        = string
+  default     = "500"
+}
+
+variable "budget_storage" {
+  description = "Presupuesto mensual para S3 storage en USD"
+  type        = string
+  default     = "500"
+}

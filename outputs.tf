@@ -149,3 +149,20 @@ output "sandbox_redshift_endpoint" {
   description = "Endpoint de Redshift sandbox"
   value       = var.enable_sandbox ? aws_redshiftserverless_workgroup.sandbox[0].endpoint : null
 }
+
+# ECR Outputs
+
+output "ecr_eks_services_url" {
+  description = "URL del repositorio ECR para servicios EKS"
+  value       = aws_ecr_repository.eks_services.repository_url
+}
+
+output "ecr_ai_agents_url" {
+  description = "URL del repositorio ECR para agentes IA"
+  value       = aws_ecr_repository.ai_agents.repository_url
+}
+
+output "ecr_ai_inference_url" {
+  description = "URL del repositorio ECR para inferencia ML"
+  value       = aws_ecr_repository.ai_inference.repository_url
+}
