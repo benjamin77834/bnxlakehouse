@@ -143,6 +143,7 @@ def handler(event, context):
 
 # SageMaker Domain (Unified) - Studio para Data Scientists
 resource "aws_sagemaker_domain" "data_lake" {
+  count       = length(var.subnet_ids) > 0 ? 1 : 0
   domain_name = "${var.project_name}-studio-${var.environment}"
   auth_mode   = "IAM"
   vpc_id      = var.vpc_id

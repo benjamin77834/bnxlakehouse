@@ -3,6 +3,7 @@
 # -----------------------------------------------------------------------------
 
 resource "aws_msk_cluster" "data_lake" {
+  count                  = length(var.subnet_ids) > 0 ? 1 : 0
   cluster_name           = "${var.project_name}-msk-${var.environment}"
   kafka_version          = "3.6.0"
   number_of_broker_nodes = var.msk_broker_nodes
@@ -10,7 +11,7 @@ resource "aws_msk_cluster" "data_lake" {
   broker_node_group_info {
     instance_type   = var.msk_instance_type
     client_subnets  = var.subnet_ids
-    security_groups = [aws_security_group.msk.id]
+    security_groups = [aws_security_group.msk[0].id]
 
     storage_info {
       ebs_storage_info {
@@ -45,6 +46,7 @@ resource "aws_cloudwatch_log_group" "msk" {
 }
 
 resource "aws_security_group" "msk" {
+  count       = length(var.subnet_ids) > 0 ? 1 : 0
   name        = "${var.project_name}-msk-sg-${var.environment}"
   description = "Security group para MSK (Kafka)"
   vpc_id      = var.vpc_id

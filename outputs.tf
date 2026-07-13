@@ -49,12 +49,12 @@ output "athena_workgroup_name" {
 
 output "redshift_workgroup_endpoint" {
   description = "Endpoint del workgroup de Redshift Serverless"
-  value       = aws_redshiftserverless_workgroup.data_lake.endpoint
+  value       = length(var.subnet_ids) > 0 ? aws_redshiftserverless_workgroup.data_lake[0].endpoint : null
 }
 
 output "redshift_namespace_id" {
   description = "ID del namespace de Redshift Serverless"
-  value       = aws_redshiftserverless_namespace.data_lake.id
+  value       = length(var.subnet_ids) > 0 ? aws_redshiftserverless_namespace.data_lake[0].id : null
 }
 
 # AI/ML Outputs
@@ -100,12 +100,12 @@ output "eks_node_role_arn" {
 
 output "msk_cluster_arn" {
   description = "ARN del cluster MSK (Kafka)"
-  value       = aws_msk_cluster.data_lake.arn
+  value       = length(var.subnet_ids) > 0 ? aws_msk_cluster.data_lake[0].arn : null
 }
 
 output "msk_bootstrap_brokers_tls" {
   description = "Bootstrap brokers TLS para conectar a Kafka"
-  value       = aws_msk_cluster.data_lake.bootstrap_brokers_tls
+  value       = length(var.subnet_ids) > 0 ? aws_msk_cluster.data_lake[0].bootstrap_brokers_tls : null
 }
 
 output "api_gateway_id" {
@@ -115,7 +115,7 @@ output "api_gateway_id" {
 
 output "sagemaker_domain_id" {
   description = "ID del SageMaker Domain (Studio Unified)"
-  value       = aws_sagemaker_domain.data_lake.id
+  value       = length(var.subnet_ids) > 0 ? aws_sagemaker_domain.data_lake[0].id : null
 }
 
 output "lambda_serving_gold_arn" {
@@ -147,7 +147,7 @@ output "sandbox_athena_workgroup" {
 
 output "sandbox_redshift_endpoint" {
   description = "Endpoint de Redshift sandbox"
-  value       = var.enable_sandbox ? aws_redshiftserverless_workgroup.sandbox[0].endpoint : null
+  value       = var.enable_sandbox && length(var.subnet_ids) > 0 ? aws_redshiftserverless_workgroup.sandbox[0].endpoint : null
 }
 
 # ECR Outputs

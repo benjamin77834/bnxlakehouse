@@ -151,7 +151,7 @@ resource "aws_athena_workgroup" "sandbox" {
 
 # Redshift Serverless del Sandbox (capacidad mínima)
 resource "aws_redshiftserverless_namespace" "sandbox" {
-  count              = var.enable_sandbox ? 1 : 0
+  count              = var.enable_sandbox && length(var.subnet_ids) > 0 ? 1 : 0
   namespace_name     = "${var.project_name}-sandbox-${var.environment}"
   db_name            = "sandbox"
   admin_username     = var.redshift_admin_username
@@ -163,13 +163,13 @@ resource "aws_redshiftserverless_namespace" "sandbox" {
 }
 
 resource "aws_redshiftserverless_workgroup" "sandbox" {
-  count          = var.enable_sandbox ? 1 : 0
+  count          = var.enable_sandbox && length(var.subnet_ids) > 0 ? 1 : 0
   namespace_name = aws_redshiftserverless_namespace.sandbox[0].namespace_name
   workgroup_name = "${var.project_name}-sandbox-wg-${var.environment}"
   base_capacity  = 4 # Mínimo posible para ahorrar
 
   subnet_ids         = var.subnet_ids
-  security_group_ids = [aws_security_group.redshift.id]
+  security_group_ids = [aws_security_group.redshift[0].id]
 
   tags = merge(local.common_tags, { Sandbox = "true" })
 }

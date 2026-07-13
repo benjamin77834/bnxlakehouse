@@ -25,13 +25,15 @@ variable "environment" {
 # -----------------------------------------------------------------------------
 
 variable "vpc_id" {
-  description = "ID de la VPC donde se despliega Redshift"
+  description = "ID de la VPC donde se despliega Redshift, Neptune, MSK, EKS (opcional, configurar después)"
   type        = string
+  default     = ""
 }
 
 variable "subnet_ids" {
-  description = "Lista de subnet IDs para Redshift Serverless"
+  description = "Lista de subnet IDs para servicios con VPC (opcional, configurar después)"
   type        = list(string)
+  default     = []
 }
 
 variable "redshift_allowed_cidrs" {
@@ -57,9 +59,10 @@ variable "redshift_admin_username" {
 }
 
 variable "redshift_admin_password" {
-  description = "Contraseña del administrador de Redshift"
+  description = "Contraseña del administrador de Redshift (requerida solo si subnet_ids está configurado)"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "redshift_base_capacity" {
@@ -153,4 +156,40 @@ variable "budget_storage" {
   description = "Presupuesto mensual para S3 storage en USD"
   type        = string
   default     = "500"
+}
+
+# -----------------------------------------------------------------------------
+# Variables de Reporte de Costos
+# -----------------------------------------------------------------------------
+
+variable "cost_report_emails" {
+  description = "Lista de emails para recibir el reporte diario de costos"
+  type        = list(string)
+  default     = []
+}
+
+# -----------------------------------------------------------------------------
+# Variables de Neptune
+# -----------------------------------------------------------------------------
+
+variable "neptune_instance_count" {
+  description = "Número de instancias Neptune"
+  type        = number
+  default     = 1
+}
+
+variable "neptune_instance_class" {
+  description = "Tipo de instancia Neptune"
+  type        = string
+  default     = "db.t3.medium"
+}
+
+# -----------------------------------------------------------------------------
+# Variables de PWA (Amplify)
+# -----------------------------------------------------------------------------
+
+variable "pwa_repository_url" {
+  description = "URL del repositorio Git para Amplify (el mismo repo del proyecto)"
+  type        = string
+  default     = "https://github.com/benjamin77834/bnxlakehouse"
 }

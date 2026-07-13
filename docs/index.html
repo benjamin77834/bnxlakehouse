@@ -98,6 +98,7 @@
         <button class="tab" data-tab="iam">Roles IAM</button>
         <button class="tab" data-tab="costs">Costos Resumen</button>
         <button class="tab" data-tab="costs-detail">Costos Detalle</button>
+        <button class="tab" data-tab="control">Control</button>
         <button class="tab" data-tab="terraform">Terraform</button>
     </nav>
 
@@ -129,6 +130,7 @@ graph LR
         GLUE["Glue ETL + Crawlers"]
         CATALOG["Glue Catalog"]
         ATHENA["Athena"]
+        NEPTUNE["Neptune Grafos"]
     end
 
     subgraph Warehouse["Warehouse"]
@@ -182,6 +184,8 @@ graph LR
     GLUE --> CATALOG
     CATALOG --> ATHENA & REDSHIFT
     GOLD --> ATHENA & REDSHIFT & SM & BR
+    GOLD --> NEPTUNE
+    NEPTUNE --> BR
     SM --> APOUT
     BR --> APOUT
     ATHENA --> APOUT
@@ -246,14 +250,14 @@ graph LR
             <div class="spec-card">
                 <h4>7. Observabilidad</h4>
                 <p><strong>CloudWatch Dashboards (7 tableros):</strong><br>
-                - General: Vista ejecutiva de salud del data lake (S3, Lambda errores, Redshift queries).<br>
+                - General: Vista ejecutiva de salud del data lake.<br>
                 - Ingesta: Landing processor, MSK Kafka throughput y consumer lag.<br>
                 - ETL: Glue jobs duracion, bytes procesados, crawlers, tablas en catalogo.<br>
                 - Analitica: Athena datos escaneados y tiempos, Redshift RPUs y conexiones.<br>
                 - IA/ML: SageMaker invocaciones y latencia, Bedrock tokens y modelos.<br>
                 - Serving: API Gateway requests, latencia p99, errores 4xx/5xx.<br>
-                - Costos: Gasto total estimado, gasto por servicio, RPU-horas, tokens Bedrock, invocaciones Lambda, presupuestos configurados, remediaciones ejecutadas.<br><br>
-                <strong>Alarmas criticas (SNS):</strong> Lambda errores >5 en 10min, Glue jobs fallidos, Redshift >80% capacidad, API 5xx >10 en 10min, MSK disco >80%, budget excedido.<br>
+                - <strong>Costos Unificado</strong> (separado): Gasto total, desglose de 16 servicios (Redshift, S3, Lambda, API GW, Glue, Athena, MSK, SageMaker, Bedrock, Neptune, EKS, Macie, KMS, WAF, CloudWatch, ECR), proxies de consumo por hora, estado de presupuestos, remediaciones ejecutadas, findings de Macie, requests bloqueados por WAF.<br><br>
+                <strong>Alarmas criticas (SNS):</strong> Lambda errores, Glue failures, Redshift capacity, API 5xx, MSK disco, budget excedido, PII detectada.<br>
                 <strong>Logs centralizados:</strong> Todos los Lambda, Glue jobs y MSK con retencion de 30 dias.</p>
             </div>
             <div class="spec-card">
@@ -297,6 +301,37 @@ graph LR
                 <strong>PreProd:</strong> Replica exacta de produccion para validacion final antes de deploy.<br>
                 <strong>Produccion:</strong> Ambiente productivo con todos los controles de seguridad y compliance.<br><br>
                 <strong>SCP (Service Control Policies):</strong> Politicas que restringen lo que cada cuenta puede hacer (ej: sandbox solo puede usar us-east-1).</p>
+            </div>
+            <div class="spec-card">
+                <h4>12. Proteccion de Datos (PII / Confidencial)</h4>
+                <p><strong>Amazon Macie:</strong> Escanea automaticamente los buckets Bronze, Silver y Gold semanalmente buscando PII: tarjetas de credito, SSN, emails, telefonos, pasaportes, llaves AWS. Genera findings y dispara alarma si encuentra datos sensibles.<br><br>
+                <strong>Bedrock Guardrails:</strong> Filtro activo en todos los modelos de IA generativa. Configurado para:<br>
+                - BLOQUEAR: SSN, tarjetas de credito, llaves AWS, pasaportes, licencias de conducir<br>
+                - ANONIMIZAR: emails, telefonos, nombres, IPs (reemplaza con [REDACTED])<br>
+                - FILTRAR: contenido de odio, insultos, sexual, violencia<br><br>
+                <strong>Flujo de proteccion:</strong><br>
+                1. Datos llegan a Bronze → Macie escanea semanalmente<br>
+                2. Si Macie detecta PII → alarma critica + notificacion al equipo<br>
+                3. Glue ETL aplica transformaciones de anonimizacion en Silver<br>
+                4. Gold solo tiene datos limpios/anonimizados<br>
+                5. Bedrock Guardrails filtra PII en tiempo real en GenAI<br><br>
+                <strong>Alarma:</strong> Si Macie detecta cualquier PII, se dispara alerta critica inmediata via SNS.</p>
+            </div>
+            <div class="spec-card">
+                <h4>13. Lambda Functions del Proyecto</h4>
+                <p>El data lake tiene 5 funciones Lambda, cada una con un proposito especifico:<br><br>
+                <strong>landing-processor</strong> (main.tf)<br>
+                Valida archivos que llegan al bucket Landing, los copia a Bronze con prefijo de fecha (year/month/day) y dispara el Glue Crawler para actualizar el catalogo. Se activa automaticamente via S3 Event Notification.<br><br>
+                <strong>serving-gold</strong> (outputs_serving.tf)<br>
+                Sirve datos de la capa Gold a consumidores via API Gateway. Consulta S3 Gold directamente o via Athena y devuelve resultados formateados en JSON.<br><br>
+                <strong>serving-ml</strong> (outputs_serving.tf)<br>
+                Proxy de inferencia que recibe requests del API Gateway y los envia a SageMaker Endpoints o Bedrock. Devuelve predicciones y respuestas de modelos de IA a los consumidores.<br><br>
+                <strong>cost-remediation</strong> (cost_control.tf)<br>
+                Se dispara cuando una alarma de presupuesto se activa. Puede pausar Redshift (capacity=0), throttle Lambdas de serving (concurrency=1), o detener todos los servicios no esenciales.<br><br>
+                <strong>daily-cost-report</strong> (cost_control.tf)<br>
+                Se ejecuta todos los dias a las 8 AM UTC via EventBridge. Consulta AWS Cost Explorer, calcula gasto diario, acumulado mensual, proyeccion y desglose por servicio. Envia reporte por email a la lista de distribucion via SNS.<br><br>
+                <strong>pwa-api</strong> (pwa_amplify.tf)<br>
+                Backend de la app movil PWA. Consulta Cost Explorer y CloudWatch en tiempo real, devuelve JSON con gasto total, por servicio, alarmas activas. Desplegada en API Gateway.</p>
             </div>
         </div>
     </section>
@@ -1055,6 +1090,200 @@ graph TD
         <p class="detail-footer">Precios region us-east-1, julio 2025. Sujetos a cambio por AWS.</p>
     </section>
 
+    <!-- TAB: Control - Activar/Desactivar servicios y alarmas -->
+    <section id="control" class="tab-content">
+        <h2>Panel de Control - Activar / Desactivar Servicios</h2>
+        <p style="color:var(--text-secondary); margin-bottom:20px;">Controla alarmas, servicios y remediaciones. Los comandos se copian al clipboard para ejecutar en tu terminal.</p>
+
+        <div class="section-title">Alarmas - Simular y Resetear</div>
+        <div class="control-grid">
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🚨</span>
+                    <span class="control-name">Lambda Errors</span>
+                    <span class="control-status status-ok">OK</span>
+                </div>
+                <p class="control-desc">Alarma cuando Lambda landing-processor tiene mas de 5 errores en 10 min</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-landing-errors-dev --state-value ALARM --state-reason \"Test manual\"')">Activar ALARM</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-landing-errors-dev --state-value OK --state-reason \"Reset manual\"')">Reset OK</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">📊</span>
+                    <span class="control-name">Redshift Capacity</span>
+                    <span class="control-status status-ok">OK</span>
+                </div>
+                <p class="control-desc">Alarma cuando Redshift usa mas del 80% de capacidad base</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-redshift-high-capacity-dev --state-value ALARM --state-reason \"Test manual\"')">Activar ALARM</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-redshift-high-capacity-dev --state-value OK --state-reason \"Reset manual\"')">Reset OK</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🌐</span>
+                    <span class="control-name">API 5xx Errors</span>
+                    <span class="control-status status-ok">OK</span>
+                </div>
+                <p class="control-desc">Alarma cuando API Gateway tiene mas de 10 errores 5xx en 10 min</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-api-5xx-dev --state-value ALARM --state-reason \"Test manual\"')">Activar ALARM</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-api-5xx-dev --state-value OK --state-reason \"Reset manual\"')">Reset OK</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">📨</span>
+                    <span class="control-name">MSK Disco</span>
+                    <span class="control-status status-ok">OK</span>
+                </div>
+                <p class="control-desc">Alarma cuando Kafka tiene disco mayor a 80%</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-msk-disk-high-dev --state-value ALARM --state-reason \"Test manual\"')">Activar ALARM</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-msk-disk-high-dev --state-value OK --state-reason \"Reset manual\"')">Reset OK</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🔒</span>
+                    <span class="control-name">PII Detectada (Macie)</span>
+                    <span class="control-status status-ok">OK</span>
+                </div>
+                <p class="control-desc">Alarma cuando Macie detecta datos personales en los buckets</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-pii-detected-dev --state-value ALARM --state-reason \"Test PII\"')">Activar ALARM</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws cloudwatch set-alarm-state --alarm-name datalake-pii-detected-dev --state-value OK --state-reason \"Reset\"')">Reset OK</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Remediacion de Costos - Acciones</div>
+        <div class="control-grid">
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">⏸️</span>
+                    <span class="control-name">Pausar Redshift</span>
+                </div>
+                <p class="control-desc">Pone capacity a 0. Redshift deja de cobrar inmediatamente.</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws lambda invoke --function-name datalake-cost-remediation-dev --payload \'{}\" --cli-binary-format raw-in-base64-out /tmp/r.json && cat /tmp/r.json')">Pausar</button>
+                    <button class="ctrl-btn btn-yellow" onclick="copyCmd('aws lambda invoke --function-name datalake-cost-remediation-dev --payload \'{\"action\":\"pause_redshift\"}\' --cli-binary-format raw-in-base64-out /tmp/r.json && cat /tmp/r.json')">Ejecutar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🐢</span>
+                    <span class="control-name">Throttle Lambdas</span>
+                </div>
+                <p class="control-desc">Reduce concurrencia de Lambdas serving a 1. Limita costos de invocaciones.</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-yellow" onclick="copyCmd('aws lambda invoke --function-name datalake-cost-remediation-dev --payload \'{\"action\":\"throttle_lambda\"}\' --cli-binary-format raw-in-base64-out /tmp/r.json && cat /tmp/r.json')">Throttle</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws lambda put-function-concurrency --function-name datalake-serving-gold-dev --reserved-concurrent-executions 100')">Restaurar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🛑</span>
+                    <span class="control-name">Parar Todo No Esencial</span>
+                </div>
+                <p class="control-desc">Pausa Redshift + detiene Lambdas serving. Solo en emergencia de costos.</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('aws lambda invoke --function-name datalake-cost-remediation-dev --payload \'{\"action\":\"stop_all_non_essential\"}\' --cli-binary-format raw-in-base64-out /tmp/r.json && cat /tmp/r.json')">PARAR TODO</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">📧</span>
+                    <span class="control-name">Enviar Reporte Ahora</span>
+                </div>
+                <p class="control-desc">Dispara el reporte diario de costos inmediatamente (envia email).</p>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('aws lambda invoke --function-name datalake-daily-cost-report-dev --payload \'{}\' --cli-binary-format raw-in-base64-out /tmp/r.json && cat /tmp/r.json')">Enviar Reporte</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Servicios - Encender / Apagar</div>
+        <div class="control-grid">
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">📊</span>
+                    <span class="control-name">Redshift Serverless</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('terraform apply -target=aws_redshiftserverless_workgroup.data_lake -auto-approve')">Encender</button>
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('terraform destroy -target=aws_redshiftserverless_workgroup.data_lake -auto-approve')">Apagar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🕸️</span>
+                    <span class="control-name">Neptune (Grafos)</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('terraform apply -target=aws_neptune_cluster.data_lake -target=aws_neptune_cluster_instance.data_lake -auto-approve')">Encender</button>
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('terraform destroy -target=aws_neptune_cluster_instance.data_lake -target=aws_neptune_cluster.data_lake -auto-approve')">Apagar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">📨</span>
+                    <span class="control-name">MSK Kafka</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('terraform apply -target=aws_msk_cluster.data_lake -auto-approve')">Encender</button>
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('terraform destroy -target=aws_msk_cluster.data_lake -auto-approve')">Apagar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">🧪</span>
+                    <span class="control-name">Sandbox Completo</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('terraform apply -var=\"enable_sandbox=true\" -auto-approve')">Activar</button>
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('terraform apply -var=\"enable_sandbox=false\" -auto-approve')">Desactivar</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-title">Consultas Rapidas</div>
+        <div class="control-grid">
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">👁️</span>
+                    <span class="control-name">Ver Alarmas Activas</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-yellow" onclick="copyCmd('aws cloudwatch describe-alarms --state-value ALARM --output table')">Copiar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">💰</span>
+                    <span class="control-name">Ver Costos Hoy</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-yellow" onclick="copyCmd('aws ce get-cost-and-usage --time-period Start=$(date -v-1d +%Y-%m-%d),End=$(date +%Y-%m-%d) --granularity DAILY --metrics UnblendedCost --output table')">Copiar</button>
+                </div>
+            </div>
+            <div class="control-card">
+                <div class="control-header">
+                    <span class="control-icon">📋</span>
+                    <span class="control-name">Listar Recursos Terraform</span>
+                </div>
+                <div class="control-actions">
+                    <button class="ctrl-btn btn-yellow" onclick="copyCmd('terraform state list | wc -l && terraform state list')">Copiar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast notification -->
+        <div class="toast" id="toast">Comando copiado al clipboard</div>
+    </section>
+
     <!-- TAB: Terraform -->
     <section id="terraform" class="tab-content">
         <h2>Estructura de Archivos Terraform</h2>
@@ -1113,6 +1342,11 @@ graph TB
                     <tr><td><code>observability.tf</code></td><td>7 CloudWatch Dashboards (General, Ingesta, ETL, Analitica, IA/ML, Serving, Costos), 5 Alarmas criticas, SNS Topics, Log Groups centralizados</td></tr>
                     <tr><td><code>security.tf</code></td><td>KMS key + alias, WAF Web ACL (rate limit + SQLi + OWASP), GuardDuty detector, CloudTrail + S3 bucket auditoria, AWS Config recorder + 2 reglas compliance, IAM role Config</td></tr>
                     <tr><td><code>ecr.tf</code></td><td>8 repositorios ECR (eks-services, eks-jobs, eks-ingestion, ai-training, ai-inference, ai-agents, ai-pipelines, etl-custom) + lifecycle policies + scan on push + KMS</td></tr>
+                    <tr><td><code>data_protection.tf</code></td><td>Macie (3 classification jobs Bronze/Silver/Gold), Bedrock Guardrail (PII filter + content filter), alarma PII detectada</td></tr>
+                    <tr><td><code>neptune.tf</code></td><td>Neptune cluster + instancia + subnet group + security group (grafos, lineaje, knowledge graphs)</td></tr>
+                    <tr><td><code>dashboard_costs.tf</code></td><td>Dashboard unificado de costos: gasto total, por servicio (16 servicios), proxies de consumo, alertas, remediacion, presupuestos</td></tr>
+                    <tr><td><code>pwa_amplify.tf</code></td><td>Amplify App (hosting PWA), API Gateway + Lambda backend (/api/costs), CORS, deploy stage</td></tr>
+                    <tr><td><code>pwa/</code></td><td>PWA instalable en iOS/Android: index.html, manifest.json, sw.js (service worker), iconos</td></tr>
                     <tr><td><code>cost_control.tf</code></td><td>4 AWS Budgets (total, redshift, lambda+api, storage), Lambda remediacion (pausa/throttle), alarmas de costo, IAM role remediacion</td></tr>
                     <tr><td><code>accounts.tf</code></td><td>AWS Organizations, OU, 4 cuentas (sandbox, uat, preprod, prod), SCP region restrict. Condicional con enable_multi_account = true</td></tr>
                     <tr><td><code>iam.tf</code></td><td>glue_role, redshift_role, athena_role + politicas S3/Glue/Athena</td></tr>
@@ -1138,6 +1372,116 @@ graph TB
             <code>terraform state list</code> - Lista recursos creados<br>
             <code>terraform output</code> - Muestra ARNs y endpoints<br>
             <code>terraform graph | dot -Tsvg > graph.svg</code> - Grafo de dependencias
+        </div>
+
+        <h3 style="margin-top:30px;">Ejecutar solo componentes específicos</h3>
+        <div class="commands">
+            <code>terraform plan -target=aws_cloudwatch_dashboard.costs_unified</code> - Solo dashboard costos<br>
+            <code>terraform apply -target=module.observability</code> - Solo observabilidad<br>
+            <code>terraform apply -target=aws_budgets_budget.total -target=aws_budgets_budget.redshift</code> - Solo budgets<br>
+            <code>terraform apply -target=aws_lambda_function.cost_remediation</code> - Solo lambda remediacion<br>
+            <code>terraform apply -target=aws_lambda_function.daily_cost_report</code> - Solo reporte diario<br>
+            <code>terraform apply -target=aws_neptune_cluster.data_lake</code> - Solo Neptune<br>
+            <code>terraform apply -target=aws_msk_cluster.data_lake</code> - Solo Kafka<br>
+            <code>terraform apply -target=aws_bedrock_guardrail.pii_filter</code> - Solo guardrail PII<br>
+            <code>terraform destroy -target=aws_redshiftserverless_workgroup.data_lake</code> - Apagar solo Redshift<br>
+            <code>terraform destroy -target=aws_neptune_cluster_instance.data_lake</code> - Apagar solo Neptune
+        </div>
+
+        <h3 style="margin-top:30px;">Desplegar solo la PWA de Costos (Amplify)</h3>
+        <div class="commands">
+            <code>terraform apply -target=aws_amplify_app.costs_pwa -target=aws_amplify_branch.main</code> - Deploy Amplify app<br>
+            <code>terraform apply -target=aws_api_gateway_rest_api.pwa_api</code> - Deploy API backend<br>
+            <code>terraform apply -target=aws_api_gateway_stage.pwa</code> - Deploy stage API<br>
+            <code>terraform apply -target=aws_lambda_function.pwa_api</code> - Deploy Lambda API<br>
+            <code>terraform apply -target=aws_lambda_function.daily_cost_report</code> - Deploy reporte diario email<br>
+            <code>terraform apply -target=aws_sns_topic.cost_report</code> - Deploy SNS lista distribucion<br>
+            <code>terraform apply -target=aws_cloudwatch_event_rule.daily_cost_report</code> - Deploy cron diario 8AM
+        </div>
+        <div class="detail-section" style="margin-top:15px;">
+            <h3>Despliegue completo de costos + PWA (un solo comando)</h3>
+            <div class="commands">
+                <code>terraform apply \<br>
+                &nbsp;&nbsp;-target=aws_amplify_app.costs_pwa \<br>
+                &nbsp;&nbsp;-target=aws_amplify_branch.main \<br>
+                &nbsp;&nbsp;-target=aws_api_gateway_rest_api.pwa_api \<br>
+                &nbsp;&nbsp;-target=aws_api_gateway_stage.pwa \<br>
+                &nbsp;&nbsp;-target=aws_lambda_function.pwa_api \<br>
+                &nbsp;&nbsp;-target=aws_lambda_function.daily_cost_report \<br>
+                &nbsp;&nbsp;-target=aws_lambda_function.cost_remediation \<br>
+                &nbsp;&nbsp;-target=aws_sns_topic.cost_report \<br>
+                &nbsp;&nbsp;-target=aws_sns_topic.critical_alerts \<br>
+                &nbsp;&nbsp;-target=aws_cloudwatch_dashboard.costs_unified \<br>
+                &nbsp;&nbsp;-target=aws_cloudwatch_event_rule.daily_cost_report \<br>
+                &nbsp;&nbsp;-target=aws_budgets_budget.total \<br>
+                &nbsp;&nbsp;-target=aws_budgets_budget.redshift \<br>
+                &nbsp;&nbsp;-target=aws_budgets_budget.lambda_apigw \<br>
+                &nbsp;&nbsp;-target=aws_budgets_budget.storage</code>
+            </div>
+            <p class="detail-tip">Esto despliega SOLO el sistema de costos completo: PWA + API + Dashboard CloudWatch + Budgets + Alarmas + Reporte diario. No crea Redshift, Neptune, MSK ni nada que requiera VPC.</p>
+        </div>
+
+        <h3 style="margin-top:30px;">Probar la PWA en local</h3>
+        <div class="commands">
+            <code>cd pwa && python3 -m http.server 8080</code> - Servir PWA en localhost:8080<br>
+            <code>open http://localhost:8080</code> - Abrir en navegador<br>
+        </div>
+        <p class="detail-tip" style="margin-top:8px;">La PWA funciona con datos demo en local. Para datos reales, necesita el API Gateway desplegado. En iPhone: abre localhost:8080 en Safari y toca Compartir > Agregar a pantalla de inicio.</p>
+
+        <h3 style="margin-top:30px;">Vista previa del Dashboard de Costos en CloudWatch</h3>
+        <div class="cloudwatch-preview">
+            <div class="cw-header">
+                <span class="cw-logo">☁️ CloudWatch</span>
+                <span class="cw-title">datalake-costos-unificado-dev</span>
+                <span class="cw-refresh">Auto-refresh: 6h</span>
+            </div>
+            <div class="cw-grid">
+                <div class="cw-widget cw-single">
+                    <div class="cw-widget-title">Gasto Total Estimado (USD)</div>
+                    <div class="cw-big-number" id="cw-total-num">$2,847</div>
+                    <div class="cw-budget-bar">
+                        <div class="cw-bar-fill" id="cw-bar-fill" style="width: 57%"></div>
+                    </div>
+                    <div class="cw-budget-label">57% del budget ($5,000)</div>
+                </div>
+                <div class="cw-widget cw-chart">
+                    <div class="cw-widget-title">Gasto por Servicio</div>
+                    <div class="cw-bars">
+                        <div class="cw-bar-row"><span class="cw-bar-label">Redshift</span><div class="cw-bar-bg"><div class="cw-bar-val" style="width:65%; background:#f59e0b;"></div></div><span class="cw-bar-amt">$1,302</span></div>
+                        <div class="cw-bar-row"><span class="cw-bar-label">Bedrock</span><div class="cw-bar-bg"><div class="cw-bar-val" style="width:35%; background:#38bdf8;"></div></div><span class="cw-bar-amt">$698</span></div>
+                        <div class="cw-bar-row"><span class="cw-bar-label">MSK</span><div class="cw-bar-bg"><div class="cw-bar-val" style="width:23%; background:#38bdf8;"></div></div><span class="cw-bar-amt">$460</span></div>
+                        <div class="cw-bar-row"><span class="cw-bar-label">EKS</span><div class="cw-bar-bg"><div class="cw-bar-val" style="width:14%; background:#38bdf8;"></div></div><span class="cw-bar-amt">$280</span></div>
+                        <div class="cw-bar-row"><span class="cw-bar-label">S3</span><div class="cw-bar-bg"><div class="cw-bar-val" style="width:5%; background:#4ade80;"></div></div><span class="cw-bar-amt">$92</span></div>
+                        <div class="cw-bar-row"><span class="cw-bar-label">Lambda</span><div class="cw-bar-bg"><div class="cw-bar-val" style="width:1%; background:#4ade80;"></div></div><span class="cw-bar-amt">$15</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="cw-grid">
+                <div class="cw-widget cw-alert-green">
+                    <div class="cw-widget-title">Storage S3</div>
+                    <div class="cw-alert-status">✅ OK</div>
+                    <div class="cw-alert-detail">$92 / $500 (18%)</div>
+                </div>
+                <div class="cw-widget cw-alert-yellow">
+                    <div class="cw-widget-title">Redshift</div>
+                    <div class="cw-alert-status">⚠️ ATENCION</div>
+                    <div class="cw-alert-detail">$1,302 / $2,000 (65%)</div>
+                </div>
+                <div class="cw-widget cw-alert-red">
+                    <div class="cw-widget-title">Lambda + API</div>
+                    <div class="cw-alert-status">🚨 CRITICO</div>
+                    <div class="cw-alert-detail">$478 / $500 (96%) - Throttle activado</div>
+                </div>
+                <div class="cw-widget cw-alert-green">
+                    <div class="cw-widget-title">Neptune</div>
+                    <div class="cw-alert-status">✅ OK</div>
+                    <div class="cw-alert-detail">$48 / ~$100 (48%)</div>
+                </div>
+            </div>
+            <div class="cw-footer">
+                <span>Ultimo reporte enviado: hoy 8:00 AM UTC</span>
+                <span>Remediaciones este mes: 1 (throttle lambda)</span>
+            </div>
         </div>
     </section>
 </div>
@@ -1337,6 +1681,51 @@ graph TB
     footer {
         text-align: center; padding: 30px; margin-top: 40px;
         border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.85rem;
+    }
+    .cloudwatch-preview {
+        background: #1a1a2e; border-radius: 12px; border: 1px solid #334155;
+        overflow: hidden; margin: 15px 0;
+    }
+    .cw-header {
+        background: #232f3e; padding: 12px 20px; display: flex;
+        justify-content: space-between; align-items: center; border-bottom: 1px solid #334155;
+    }
+    .cw-logo { color: #ff9900; font-weight: 700; font-size: 0.95rem; }
+    .cw-title { color: #e2e8f0; font-size: 0.9rem; }
+    .cw-refresh { color: #64748b; font-size: 0.75rem; }
+    .cw-grid {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px; padding: 16px;
+    }
+    .cw-widget {
+        background: #0f172a; border-radius: 8px; padding: 14px;
+        border: 1px solid #334155;
+    }
+    .cw-widget-title { color: #94a3b8; font-size: 0.75rem; margin-bottom: 8px; text-transform: uppercase; }
+    .cw-single { grid-column: span 1; }
+    .cw-chart { grid-column: span 3; }
+    .cw-big-number { color: #38bdf8; font-size: 2.2rem; font-weight: 700; }
+    .cw-budget-bar { background: #334155; border-radius: 4px; height: 8px; margin: 8px 0; overflow: hidden; }
+    .cw-bar-fill { height: 100%; background: linear-gradient(90deg, #4ade80, #facc15); border-radius: 4px; transition: width 0.5s; }
+    .cw-budget-label { color: #64748b; font-size: 0.75rem; }
+    .cw-bars { display: flex; flex-direction: column; gap: 8px; }
+    .cw-bar-row { display: flex; align-items: center; gap: 8px; }
+    .cw-bar-label { color: #94a3b8; font-size: 0.78rem; width: 70px; text-align: right; }
+    .cw-bar-bg { flex: 1; background: #1e293b; border-radius: 3px; height: 14px; overflow: hidden; }
+    .cw-bar-val { height: 100%; border-radius: 3px; }
+    .cw-bar-amt { color: #e2e8f0; font-size: 0.78rem; width: 60px; }
+    .cw-alert-green { border-left: 4px solid #4ade80; }
+    .cw-alert-yellow { border-left: 4px solid #facc15; }
+    .cw-alert-red { border-left: 4px solid #ef4444; }
+    .cw-alert-status { font-size: 1.1rem; font-weight: 700; margin: 6px 0; }
+    .cw-alert-green .cw-alert-status { color: #4ade80; }
+    .cw-alert-yellow .cw-alert-status { color: #facc15; }
+    .cw-alert-red .cw-alert-status { color: #ef4444; }
+    .cw-alert-detail { color: #94a3b8; font-size: 0.8rem; }
+    .cw-footer {
+        background: #232f3e; padding: 10px 20px; display: flex;
+        justify-content: space-between; border-top: 1px solid #334155;
+        color: #64748b; font-size: 0.75rem;
     }
 </style>
 

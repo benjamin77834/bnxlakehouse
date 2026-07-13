@@ -323,6 +323,7 @@ resource "aws_athena_workgroup" "data_lake" {
 # -----------------------------------------------------------------------------
 
 resource "aws_redshiftserverless_namespace" "data_lake" {
+  count               = length(var.subnet_ids) > 0 ? 1 : 0
   namespace_name      = "${var.project_name}-${var.environment}"
   db_name             = var.redshift_db_name
   admin_username      = var.redshift_admin_username
@@ -334,17 +335,19 @@ resource "aws_redshiftserverless_namespace" "data_lake" {
 }
 
 resource "aws_redshiftserverless_workgroup" "data_lake" {
-  namespace_name = aws_redshiftserverless_namespace.data_lake.namespace_name
+  count          = length(var.subnet_ids) > 0 ? 1 : 0
+  namespace_name = aws_redshiftserverless_namespace.data_lake[0].namespace_name
   workgroup_name = "${var.project_name}-wg-${var.environment}"
   base_capacity  = var.redshift_base_capacity
 
   subnet_ids         = var.subnet_ids
-  security_group_ids = [aws_security_group.redshift.id]
+  security_group_ids = [aws_security_group.redshift[0].id]
 
   tags = local.common_tags
 }
 
 resource "aws_security_group" "redshift" {
+  count       = length(var.subnet_ids) > 0 ? 1 : 0
   name        = "${var.project_name}-redshift-sg-${var.environment}"
   description = "Security group para Redshift Serverless"
   vpc_id      = var.vpc_id

@@ -23,3 +23,25 @@ msk_ebs_volume_size = 100
 # Sandbox (poner true para habilitar ambiente de pruebas)
 enable_sandbox             = false
 sandbox_athena_scan_limit  = 104857600  # 100 MB
+
+# Multi-Cuenta (poner true para crear cuentas separadas)
+enable_multi_account = false
+account_emails = {
+  sandbox = "datalake-sandbox@tuempresa.com"
+  uat     = "datalake-uat@tuempresa.com"
+  preprod = "datalake-preprod@tuempresa.com"
+  prod    = "datalake-prod@tuempresa.com"
+}
+
+# Control de Costos
+budget_total      = "5000"
+budget_redshift   = "2000"
+budget_lambda_api = "500"
+budget_storage    = "500"
+
+# Reporte diario de costos (lista de distribución)
+cost_report_emails = [
+  "equipo-data@tuempresa.com",
+  "finanzas@tuempresa.com",
+  "lider-tecnico@tuempresa.com"
+]

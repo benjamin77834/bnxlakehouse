@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0f172a">
+    <title>Data Lake Costs</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg: #0f172a; --card: #1e293b; --border: #334155;
+            --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+            --green: #4ade80; --yellow: #facc15; --red: #ef4444;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif;
+            background: var(--bg); color: var(--text);
+            min-height: 100vh; padding: 0 0 80px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .header {
+            background: var(--card); padding: 20px 16px 16px;
+            border-bottom: 1px solid var(--border);
+            position: sticky; top: 0; z-index: 10;
+            padding-top: env(safe-area-inset-top, 20px);
+        }
+        .header h1 { font-size: 1.3rem; color: var(--accent); }
+        .header p { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+        .refresh-btn {
+            position: absolute; right: 16px; top: 24px;
+            background: var(--border); border: none; border-radius: 8px;
+            padding: 8px 12px; color: var(--muted); font-size: 0.8rem; cursor: pointer;
+        }
+        .content { padding: 16px; }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>💰 Data Lake Costs</h1>
+    <p id="last-update">Cargando...</p>
+    <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+</div>
+<div class="content">
+    <!-- Total Card -->
+    <div class="total-card" id="total-card">
+        <div class="total-label">Gasto del Mes</div>
+        <div class="total-amount" id="total-amount">--</div>
+        <div class="budget-bar"><div class="budget-fill" id="budget-fill"></div></div>
+        <div class="budget-text" id="budget-text">-- / --</div>
+    </div>
+
+    <div class="metrics-detail">
+        <div class="metric-row">
+            <div class="metric-item">
+                <span class="metric-value" id="m-daily">--</span>
+                <span class="metric-label">Gasto de Ayer</span>
+                <span class="metric-desc">Lo que se cobro en las ultimas 24h por todos los servicios activos</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="m-projected">--</span>
+                <span class="metric-label">Proyeccion Fin de Mes</span>
+                <span class="metric-desc">Estimacion si el ritmo de gasto se mantiene igual los dias restantes</span>
+            </div>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item">
+                <span class="metric-value" id="m-budget">--</span>
+                <span class="metric-label">Budget Mensual</span>
+                <span class="metric-desc">Presupuesto maximo configurado. Al 80% se alerta, al 90% se actua</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-value" id="m-pct">--</span>
+                <span class="metric-label">% Consumido</span>
+                <span class="metric-desc">Porcentaje del presupuesto usado hasta hoy. Verde &lt;70, Amarillo 70-90, Rojo &gt;90</span>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
+
+<style>
+    .total-card {
+        background: linear-gradient(135deg, #1e3a5f, #0f172a);
+        border: 2px solid var(--accent); border-radius: 16px;
+        padding: 24px; text-align: center; margin-bottom: 16px;
+    }
+    .total-label { color: var(--muted); font-size: 0.85rem; text-transform: uppercase; }
+    .total-amount { font-size: 3rem; font-weight: 800; color: var(--accent); margin: 8px 0; }
+    .budget-bar { background: var(--border); border-radius: 6px; height: 10px; margin: 12px 0 8px; overflow: hidden; }
+    .budget-fill { height: 100%; border-radius: 6px; transition: width 0.8s, background 0.5s; }
+    .budget-text { color: var(--muted); font-size: 0.8rem; }
+
+    .metrics-detail { margin-top: 16px; }
+    .metric-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .metric-item {
+        background: var(--card); border-radius: 10px; padding: 12px;
+        border: 1px solid var(--border);
+    }
+    .metric-value { display: block; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+    .metric-label { display: block; font-size: 0.75rem; color: var(--text); margin-top: 2px; font-weight: 600; }
+    .metric-desc { display: block; font-size: 0.65rem; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+    .section-title { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; margin: 20px 0 10px; letter-spacing: 1px; }
+
+    .alerts-grid { display: flex; flex-direction: column; gap: 10px; }
+    .alert-card {
+        background: var(--card); border-radius: 12px; padding: 14px 16px;
+        display: flex; align-items: center; gap: 12px;
+        border-left: 4px solid var(--green);
+    }
+    .alert-card.warning { border-left-color: var(--yellow); }
+    .alert-card.critical { border-left-color: var(--red); }
+    .alert-icon { font-size: 1.5rem; }
+    .alert-info { flex: 1; }
+    .alert-name { font-size: 0.9rem; font-weight: 600; }
+    .alert-detail { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .alert-badge {
+        font-size: 0.7rem; font-weight: 700; padding: 4px 8px;
+        border-radius: 6px; text-transform: uppercase;
+    }
+    .alert-card .alert-badge { background: #052e16; color: var(--green); }
+    .alert-card.warning .alert-badge { background: #422006; color: var(--yellow); }
+    .alert-card.critical .alert-badge { background: #450a0a; color: var(--red); }
+
+    .services-grid { display: flex; flex-direction: column; gap: 8px; }
+    .svc-row {
+        background: var(--card); border-radius: 10px; padding: 12px 14px;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .svc-icon { font-size: 1.3rem; }
+    .svc-info { flex: 1; }
+    .svc-name { font-size: 0.85rem; font-weight: 500; }
+    .svc-bar { background: var(--border); border-radius: 3px; height: 6px; margin-top: 4px; overflow: hidden; }
+    .svc-bar-fill { height: 100%; border-radius: 3px; background: var(--accent); }
+    .svc-amount { font-size: 0.9rem; font-weight: 700; color: var(--accent); }
+
+    .nav-bar {
+        position: fixed; bottom: 0; left: 0; right: 0;
+        background: var(--card); border-top: 1px solid var(--border);
+        display: flex; justify-content: space-around; padding: 10px 0;
+        padding-bottom: env(safe-area-inset-bottom, 10px);
+    }
+    .nav-item { text-align: center; color: var(--muted); font-size: 0.7rem; cursor: pointer; }
+    .nav-item.active { color: var(--accent); }
+    .nav-item span { display: block; font-size: 1.3rem; margin-bottom: 2px; }
+
+    .users-grid { display: flex; flex-direction: column; gap: 8px; }
+    .user-row {
+        background: var(--card); border-radius: 10px; padding: 12px 14px;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .user-avatar {
+        width: 36px; height: 36px; border-radius: 50%; background: var(--border);
+        display: flex; align-items: center; justify-content: center; font-size: 0.9rem;
+    }
+    .user-info { flex: 1; }
+    .user-name { font-size: 0.85rem; font-weight: 600; }
+    .user-detail { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+    .user-actions { font-size: 0.85rem; font-weight: 700; color: var(--accent); }
+</style>
+
+<!-- Alerts Section -->
+<div class="content">
+    <div class="section-title">Alarmas Activas</div>
+    <div class="alerts-grid" id="alerts-grid">
+        <!-- Se llena dinámicamente -->
+    </div>
+
+    <div class="section-title">Gasto por Servicio</div>
+    <div class="services-grid" id="services-grid">
+        <!-- Se llena dinámicamente -->
+    </div>
+
+    <div class="section-title">Actividad por Usuario (este mes)</div>
+    <p style="color:var(--muted); font-size:0.72rem; margin-bottom:8px;">Usuarios/roles que generaron acciones con costo: queries, invocaciones de modelos, jobs de ETL, uploads.</p>
+    <div class="users-grid" id="users-grid">
+        <!-- Se llena dinámicamente -->
+    </div>
+</div>
+
+<!-- Navigation Bar -->
+<div class="nav-bar">
+    <div class="nav-item active"><span>💰</span>Costos</div>
+    <div class="nav-item"><span>🚨</span>Alarmas</div>
+    <div class="nav-item"><span>📊</span>Métricas</div>
+    <div class="nav-item"><span>⚙️</span>Config</div>
+</div>
+
+<script>
+const API_URL = window.location.hostname === 'localhost'
+    ? 'http://localhost:3000/api'
+    : 'https://ihaoq852kd.execute-api.us-east-1.amazonaws.com/dev/api';
+
+const SERVICES_META = {
+    'Amazon Redshift': { icon: '📊', budget: 2000 },
+    'Amazon Simple Storage Service': { icon: '💾', budget: 500, name: 'S3' },
+    'AWS Lambda': { icon: '⚡', budget: 250 },
+    'Amazon API Gateway': { icon: '🌐', budget: 250 },
+    'AWS Glue': { icon: '⚙️', budget: 300 },
+    'Amazon Athena': { icon: '🔍', budget: 200 },
+    'Amazon Managed Streaming for Apache Kafka': { icon: '📨', budget: 500, name: 'MSK Kafka' },
+    'Amazon SageMaker': { icon: '🧠', budget: 500 },
+    'Amazon Bedrock': { icon: '🤖', budget: 1500 },
+    'Amazon Neptune': { icon: '🕸️', budget: 100 },
+    'Amazon Elastic Kubernetes Service': { icon: '☸️', budget: 400, name: 'EKS' },
+    'Amazon Macie': { icon: '🔒', budget: 50 },
+    'Amazon CloudWatch': { icon: '📡', budget: 50 },
+    'Amazon ECR': { icon: '📦', budget: 20, name: 'ECR' }
+};
+
+// Demo data (reemplazar con fetch a API real)
+const DEMO_DATA = {
+    total: 2847,
+    budget: 5000,
+    daily: 94.5,
+    projected: 4250,
+    services: [
+        { name: 'Amazon Redshift', amount: 1302 },
+        { name: 'Amazon Bedrock', amount: 698 },
+        { name: 'Amazon Managed Streaming for Apache Kafka', amount: 460 },
+        { name: 'Amazon Elastic Kubernetes Service', amount: 280 },
+        { name: 'Amazon Simple Storage Service', amount: 92 },
+        { name: 'Amazon Neptune', amount: 48 },
+        { name: 'AWS Glue', amount: 33 },
+        { name: 'AWS Lambda', amount: 23 },
+        { name: 'Amazon Athena', amount: 18 },
+        { name: 'Amazon CloudWatch', amount: 24 },
+        { name: 'Amazon Macie', amount: 12 },
+        { name: 'Amazon ECR', amount: 5 }
+    ],
+    alarms: [
+        { name: 'Lambda + API Gateway', status: 'critical', detail: '$478 / $500 (96%) - Throttle activado', action: 'throttle_lambda' },
+        { name: 'Redshift Serverless', status: 'warning', detail: '$1,302 / $2,000 (65%) - Monitorear', action: null },
+        { name: 'Storage S3', status: 'ok', detail: '$92 / $500 (18%)', action: null },
+        { name: 'Neptune', status: 'ok', detail: '$48 / $100 (48%)', action: null },
+        { name: 'Bedrock GenAI', status: 'warning', detail: '$698 / $1,500 (47%) - Creciendo rapido', action: null }
+    ],
+    users: [
+        { user: 'data-engineer-01', actions: 47, services: ['glue', 'athena', 's3'], top_events: ['StartJobRun', 'StartQueryExecution', 'PutObject'] },
+        { user: 'ml-scientist-02', actions: 32, services: ['sagemaker', 'bedrock', 's3'], top_events: ['InvokeModel', 'InvokeEndpoint', 'CreateTrainingJob'] },
+        { user: 'backend-svc-role', actions: 28, services: ['lambda', 'apigateway', 's3'], top_events: ['Invoke', 'PutObject', 'GetObject'] },
+        { user: 'analytics-user', actions: 15, services: ['athena', 'redshift', 'quicksight'], top_events: ['StartQueryExecution', 'ExecuteStatement'] },
+        { user: 'admin-ops', actions: 8, services: ['cloudformation', 'iam', 'config'], top_events: ['UpdateStack', 'CreateRole'] }
+    ]
+};
+
+function loadData() {
+    fetch(API_URL + '/costs')
+        .then(r => r.json())
+        .then(data => render(data))
+        .catch(err => {
+            console.log('API no disponible, usando datos demo:', err);
+            render(DEMO_DATA);
+        });
+}
+
+function render(data) {
+    // Total
+    const pct = (data.total / data.budget) * 100;
+    document.getElementById('total-amount').textContent = '$' + data.total.toLocaleString();
+    document.getElementById('budget-fill').style.width = Math.min(pct, 100) + '%';
+    document.getElementById('budget-fill').style.background =
+        pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
+    document.getElementById('budget-text').textContent =
+        `$${data.total.toLocaleString()} / $${data.budget.toLocaleString()} (${pct.toFixed(0)}%) | Ayer: $${data.daily.toFixed(0)}`;
+    document.getElementById('total-card').style.borderColor =
+        pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--accent)';
+
+    // Metricas detalle
+    document.getElementById('m-daily').textContent = '$' + data.daily.toFixed(2);
+    document.getElementById('m-projected').textContent = '$' + data.projected.toLocaleString(undefined, {maximumFractionDigits:0});
+    document.getElementById('m-budget').textContent = '$' + data.budget.toLocaleString();
+    document.getElementById('m-pct').textContent = pct.toFixed(1) + '%';
+    document.getElementById('m-pct').style.color =
+        pct > 90 ? 'var(--red)' : pct > 70 ? 'var(--yellow)' : 'var(--green)';
+
+    // Alarms
+    const alertsHtml = data.alarms.map(a => {
+        const cls = a.status === 'critical' ? 'critical' : a.status === 'warning' ? 'warning' : '';
+        const icon = a.status === 'critical' ? '🚨' : a.status === 'warning' ? '⚠️' : '✅';
+        const badge = a.status === 'critical' ? 'CRITICO' : a.status === 'warning' ? 'ATENCION' : 'OK';
+        return `<div class="alert-card ${cls}">
+            <div class="alert-icon">${icon}</div>
+            <div class="alert-info">
+                <div class="alert-name">${a.name}</div>
+                <div class="alert-detail">${a.detail}</div>
+            </div>
+            <div class="alert-badge">${badge}</div>
+        </div>`;
+    }).join('');
+    document.getElementById('alerts-grid').innerHTML = alertsHtml;
+
+    // Services
+    const maxAmount = Math.max(...data.services.map(s => s.amount));
+    const svcsHtml = data.services.map(s => {
+        const meta = SERVICES_META[s.name] || { icon: '📦', budget: 500 };
+        const displayName = meta.name || s.name.replace('Amazon ', '').replace('AWS ', '');
+        const pctBar = (s.amount / maxAmount) * 100;
+        return `<div class="svc-row">
+            <div class="svc-icon">${meta.icon}</div>
+            <div class="svc-info">
+                <div class="svc-name">${displayName}</div>
+                <div class="svc-bar"><div class="svc-bar-fill" style="width:${pctBar}%"></div></div>
+            </div>
+            <div class="svc-amount">$${s.amount.toLocaleString()}</div>
+        </div>`;
+    }).join('');
+    document.getElementById('services-grid').innerHTML = svcsHtml;
+
+    // Users
+    const usersHtml = (data.users || []).map(u => {
+        const initials = u.user.split('-').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        return `<div class="user-row">
+            <div class="user-avatar">${initials}</div>
+            <div class="user-info">
+                <div class="user-name">${u.user}</div>
+                <div class="user-detail">${u.services.join(', ')} | ${u.top_events.slice(0,2).join(', ')}</div>
+            </div>
+            <div class="user-actions">${u.actions} ops</div>
+        </div>`;
+    }).join('');
+    document.getElementById('users-grid').innerHTML = usersHtml;
+
+    // Update time
+    document.getElementById('last-update').textContent =
+        'Actualizado: ' + new Date().toLocaleString('es-ES', { hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'short' });
+}
+
+// Load on start
+loadData();
+
+// Auto-refresh every 5 min
+setInterval(loadData, 300000);
+
+// Register service worker
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+}
+</script>

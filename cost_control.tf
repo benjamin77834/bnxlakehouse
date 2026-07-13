@@ -348,3 +348,134 @@ resource "aws_cloudwatch_metric_alarm" "lambda_cost_high" {
 
   tags = local.common_tags
 }
+
+# -----------------------------------------------------------------------------
+# Reporte Diario de Costos por Email
+# -----------------------------------------------------------------------------
+
+# SNS Topic para lista de distribución de costos
+resource "aws_sns_topic" "cost_report" {
+  name = "${var.project_name}-cost-report-${var.environment}"
+  tags = local.common_tags
+}
+
+# Suscripción de emails (lista de distribución)
+resource "aws_sns_topic_subscription" "cost_report_emails" {
+  for_each  = toset(var.cost_report_emails)
+  topic_arn = aws_sns_topic.cost_report.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
+# Lambda que genera y envía el reporte diario
+resource "aws_lambda_function" "daily_cost_report" {
+  function_name = "${var.project_name}-daily-cost-report-${var.environment}"
+  role          = aws_iam_role.cost_report_role.arn
+  handler       = "index.handler"
+  runtime       = "python3.12"
+  timeout       = 120
+  memory_size   = 256
+
+  filename         = data.archive_file.daily_cost_report.output_path
+  source_code_hash = data.archive_file.daily_cost_report.output_base64sha256
+
+  environment {
+    variables = {
+      SNS_TOPIC_ARN = aws_sns_topic.cost_report.arn
+      PROJECT_NAME  = var.project_name
+      ENVIRONMENT   = var.environment
+      BUDGET_TOTAL  = var.budget_total
+    }
+  }
+
+  tags = local.common_tags
+}
+
+data "archive_file" "daily_cost_report" {
+  type        = "zip"
+  output_path = "${path.module}/lambda/daily_cost_report.zip"
+  source_dir  = "${path.module}/lambda/daily_cost_report_src"
+}
+
+# EventBridge: Ejecutar Lambda todos los días a las 8:00 AM UTC
+resource "aws_cloudwatch_event_rule" "daily_cost_report" {
+  name                = "${var.project_name}-daily-cost-report-${var.environment}"
+  description         = "Ejecuta reporte diario de costos a las 8 AM UTC"
+  schedule_expression = "cron(0 8 * * ? *)"
+  tags                = local.common_tags
+}
+
+resource "aws_cloudwatch_event_target" "daily_cost_report" {
+  rule = aws_cloudwatch_event_rule.daily_cost_report.name
+  arn  = aws_lambda_function.daily_cost_report.arn
+}
+
+resource "aws_lambda_permission" "eventbridge_cost_report" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.daily_cost_report.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.daily_cost_report.arn
+}
+
+# -----------------------------------------------------------------------------
+# IAM Role para Lambda de reporte de costos
+# -----------------------------------------------------------------------------
+
+resource "aws_iam_role" "cost_report_role" {
+  name = "${var.project_name}-cost-report-role-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
+  })
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "cost_report_basic" {
+  role       = aws_iam_role.cost_report_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "cost_report_permissions" {
+  name = "${var.project_name}-cost-report-permissions-${var.environment}"
+  role = aws_iam_role.cost_report_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ce:GetCostAndUsage",
+          "ce:GetCostForecast"
+        ]
+        Resource = ["*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["sns:Publish"]
+        Resource = [aws_sns_topic.cost_report.arn]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudtrail:LookupEvents"
+        ]
+        Resource = ["*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudwatch:DescribeAlarms"
+        ]
+        Resource = ["*"]
+      }
+    ]
+  })
+}
