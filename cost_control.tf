@@ -475,6 +475,13 @@ resource "aws_iam_role_policy" "cost_report_permissions" {
           "cloudwatch:DescribeAlarms"
         ]
         Resource = ["*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "sts:AssumeRole"
+        ]
+        Resource = ["arn:aws:iam::522189038734:role/datalake-cost-reader"]
       }
     ]
   })
