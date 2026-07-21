@@ -30,9 +30,9 @@ resource "aws_cloudwatch_dashboard" "costs_unified" {
         x      = 0, y = 2, width = 8, height = 6
         properties = {
           title   = "Gasto Total Estimado (USD)"
-          region  = "us-east-1"
-          metrics = [["AWS/Billing", "EstimatedCharges", "Currency", "USD"]]
-          period  = 21600
+          region  = var.aws_region
+          metrics = [["DataLake/Costs", "TotalCostEstimated"]]
+          period  = 3600
           stat    = "Maximum"
           view    = "singleValue"
         }
@@ -41,27 +41,22 @@ resource "aws_cloudwatch_dashboard" "costs_unified" {
         type   = "metric"
         x      = 8, y = 2, width = 16, height = 6
         properties = {
-          title   = "Gasto por Servicio (USD) - Top Servicios"
-          region  = "us-east-1"
+          title   = "Gasto por Servicio (USD) - Calculado"
+          region  = var.aws_region
           metrics = [
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Redshift", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Simple Storage Service", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "AWS Lambda", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon API Gateway", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "AWS Glue", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Athena", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Managed Streaming for Apache Kafka", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon SageMaker", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Bedrock", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Neptune", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Elastic Kubernetes Service", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon Macie", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "AWS Key Management Service", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "AWS WAF", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon CloudWatch", "Currency", "USD"],
-            ["AWS/Billing", "EstimatedCharges", "ServiceName", "Amazon ECR", "Currency", "USD"]
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "Redshift"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "RDS"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "EC2"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "NAT Gateway"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "Load Balancer"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "OpenSearch"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "S3"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "MSK Kafka"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "EKS"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "SageMaker"],
+            ["DataLake/Costs", "ServiceCost", "ServiceName", "CloudWatch"]
           ]
-          period = 21600
+          period = 86400
           stat   = "Maximum"
           view   = "bar"
         }
@@ -151,7 +146,7 @@ resource "aws_cloudwatch_dashboard" "costs_unified" {
           title   = "MSK Kafka - Bytes In"
           region  = var.aws_region
           metrics = [["AWS/Kafka", "BytesInPerSec", "Cluster Name", "${var.project_name}-msk-${var.environment}"]]
-          period  = 300
+          period  = 3600
           stat    = "Average"
         }
       },
@@ -162,7 +157,7 @@ resource "aws_cloudwatch_dashboard" "costs_unified" {
           title   = "API Gateway Requests"
           region  = var.aws_region
           metrics = [["AWS/ApiGateway", "Count", "ApiName", "${var.project_name}-api-${var.environment}"]]
-          period  = 300
+          period  = 3600
           stat    = "Sum"
         }
       },
@@ -173,7 +168,7 @@ resource "aws_cloudwatch_dashboard" "costs_unified" {
           title   = "EKS - Node CPU"
           region  = var.aws_region
           metrics = [["ContainerInsights", "node_cpu_utilization", "ClusterName", "${var.project_name}-eks-${var.environment}"]]
-          period  = 300
+          period  = 3600
           stat    = "Average"
         }
       },
@@ -204,11 +199,15 @@ resource "aws_cloudwatch_dashboard" "costs_unified" {
         type   = "metric"
         x      = 8, y = 20, width = 8, height = 5
         properties = {
-          title   = "Macie - Findings PII"
+          title   = "Actividad por Usuario (acciones/dia)"
           region  = var.aws_region
-          metrics = [["AWS/Macie", "SensitiveDataDiscoveryResult"]]
-          period  = 86400
-          stat    = "Sum"
+          metrics = [
+            ["DataLake/Costs", "UserActions", "UserName", "benjamin.garcia@banamex.com"],
+            ["DataLake/Costs", "UserActions", "UserName", "AWSServiceRoleForConfig"],
+            ["DataLake/Costs", "UserActions", "UserName", "datalake-cost-calculator-role-dev"]
+          ]
+          period = 86400
+          stat   = "Maximum"
         }
       },
       {

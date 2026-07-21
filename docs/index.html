@@ -105,104 +105,148 @@
 
     <!-- TAB: Arquitectura -->
     <section id="architecture" class="tab-content active">
-        <h2>Diagrama de Arquitectura General <button class="fullscreen-btn" onclick="openFullscreen('arch-mermaid')">⛶ Ver completo</button></h2>
+        <h2>Diagrama de Arquitectura General <button class="fullscreen-btn" onclick="openFullscreen('arch-mermaid')">⛶ Ver completo</button> <button class="fullscreen-btn" onclick="zoomIn()">＋ Zoom In</button> <button class="fullscreen-btn" onclick="zoomOut()">－ Zoom Out</button> <button class="fullscreen-btn" onclick="zoomReset()">↺ Reset</button></h2>
+        <div style="overflow:hidden; border:1px solid var(--border); border-radius:12px; min-height:400px;">
+        <div id="arch-wrapper" style="transform-origin:0 0; transition:transform 0.3s;">
         <div class="mermaid" id="arch-mermaid">
 graph LR
-    subgraph Sources["Fuentes"]
-        SRC1["APIs"]
-        SRC2["BDs"]
-        SRC3["IoT"]
-        SRC4["Batch/SFTP"]
-        SRC5["Eventos"]
+    subgraph FUENTES["1. FUENTES"]
+        direction TB
+        SRC1["APIs"] ~~~ SRC2["BDs"] ~~~ SRC3["IoT"] ~~~ SRC4["Batch/SFTP"] ~~~ SRC5["Eventos"]
     end
 
-    subgraph Ingestion["Ingesta"]
-        API["API GW + Lambda"]
-        EKS["EKS"]
-        LANDING["S3 Landing"]
-        MSK["MSK Kafka"]
-        ECR_EKS["ECR: eks-services, eks-jobs, eks-ingestion"]
+    subgraph INGESTA["2. INGESTA"]
+        direction TB
+        APIGW["API GW + Lambda"] ~~~ EKS["EKS"] ~~~ MSK["MSK Kafka"] ~~~ LANDING["S3 Landing"]
     end
 
-    subgraph Lakehouse["Data Lakehouse"]
-        BRONZE["S3 Bronze"]
-        SILVER["S3 Silver"]
-        GOLD["S3 Gold"]
-        GLUE["Glue ETL + Crawlers"]
-        CATALOG["Glue Catalog"]
-        ATHENA["Athena"]
-        NEPTUNE["Neptune Grafos"]
+    subgraph LAKEHOUSE["3. DATA LAKEHOUSE"]
+        direction LR
+        BRONZE["S3 Bronze"] --> GLUE["Glue ETL"] --> SILVER["S3 Silver"] --> GLUE2["Glue ETL"] --> GOLD["S3 Gold"] --> CATALOG["Glue Catalog"] --> ATHENA["Athena"]
     end
 
-    subgraph Warehouse["Warehouse"]
-        REDSHIFT["Redshift"]
+    subgraph CONSUMO["4. CONSUMO"]
+        direction TB
+        REDSHIFT["Redshift"] ~~~ SM["SageMaker"] ~~~ BR["Bedrock FM + KB"] ~~~ CHATBOT["Chatbot RAG"]
     end
 
-    subgraph AI["IA Generativa / ML"]
-        SM["SageMaker Studio + Training + Endpoints"]
-        BR["Bedrock FM + KB + Agents"]
-        ECR_AI["ECR: ai-training, ai-inference, ai-agents, ai-pipelines"]
+    subgraph SALIDA["5. SALIDA"]
+        direction TB
+        APIOUT["API GW REST"] ~~~ LAMBDAS["Lambdas Serving"] ~~~ APPS["Consumidores / Apps"]
     end
 
-    subgraph Serving["Salida"]
-        APOUT["API GW + Lambdas"]
-        APPS["Consumidores"]
+    subgraph TRANSVERSAL["6. TRANSVERSAL"]
+        direction LR
+        OBS["Observabilidad: CloudWatch + Alarmas"] ~~~ SEC["Seguridad: KMS + WAF + GuardDuty + Macie"] ~~~ COSTS["Costos: Budgets + Remediacion + PWA"] ~~~ LF["Lake Formation: Accesos por tabla/columna"]
     end
 
-    subgraph Observability["Observabilidad"]
-        CW["CloudWatch Dashboards + Alarmas"]
-        SNS["SNS Alertas"]
-    end
+    FUENTES --> INGESTA --> LAKEHOUSE --> CONSUMO --> SALIDA
+    LAKEHOUSE --> TRANSVERSAL
+        </div>
+        </div>
+        </div>
 
-    subgraph Security["Seguridad"]
-        KMS["KMS Encriptacion"]
-        WAF["WAF API Protection"]
-        GD["GuardDuty Amenazas"]
-        CT["CloudTrail Auditoria"]
-        CFG["AWS Config Compliance"]
-    end
+        <h3>Diagramas por Capa</h3>
 
-    subgraph CostCtrl["Control de Costos"]
-        BUDGETS["AWS Budgets por servicio"]
-        REMEDIATION["Lambda Remediacion - Apagar/Throttle"]
-    end
+        <h4 style="color:var(--accent); margin-top:20px;">Ingesta</h4>
+        <div class="mermaid">
+graph LR
+    API["API Gateway"] --> LAMBDA["Lambda"]
+    LAMBDA --> BRONZE["S3 Bronze"]
+    EKS["EKS Jobs"] --> BRONZE
+    MSK["MSK Kafka"] --> BRONZE
+    SFTP["Archivos Batch"] --> LANDING["S3 Landing"]
+    LANDING --> PROC["Lambda Processor"]
+    PROC --> BRONZE
+    PROC --> CRAWLER["Glue Crawler"]
+        </div>
 
-    subgraph Accounts["Multi-Cuenta"]
-        SANDBOX_ACC["Sandbox"]
-        UAT_ACC["UAT"]
-        PREPROD_ACC["PreProd"]
-        PROD_ACC["Produccion"]
-    end
+        <h4 style="color:var(--accent); margin-top:20px;">Data Lakehouse</h4>
+        <div class="mermaid">
+graph LR
+    BRONZE["S3 Bronze - Raw"] --> GLUE["Glue ETL"]
+    GLUE --> SILVER["S3 Silver - Curated"]
+    SILVER --> GLUE
+    GLUE --> GOLD["S3 Gold - Augmented"]
+    CRAWLER["Crawlers"] --> CATALOG["Glue Data Catalog"]
+    CATALOG --> ATHENA["Athena SQL"]
+    GOLD --> ATHENA
+    GOLD --> REDSHIFT["Redshift Serverless"]
+    CATALOG --> REDSHIFT
+        </div>
 
-    SRC1 & SRC3 --> API
-    SRC5 --> MSK
-    SRC2 --> EKS
-    SRC4 --> LANDING
-    API & MSK & EKS --> BRONZE
-    LANDING --> BRONZE
-    BRONZE --> GLUE --> SILVER
-    SILVER --> GLUE --> GOLD
-    GLUE --> CATALOG
-    CATALOG --> ATHENA & REDSHIFT
-    GOLD --> ATHENA & REDSHIFT & SM & BR
-    GOLD --> NEPTUNE
-    NEPTUNE --> BR
-    SM --> APOUT
-    BR --> APOUT
-    ATHENA --> APOUT
-    APOUT --> APPS
-    GLUE & SM & BR & APOUT & MSK --> CW
-    CW --> SNS
-    WAF --> APOUT
-    KMS --> BRONZE & SILVER & GOLD
-    CT --> BRONZE & SILVER & GOLD
-    GD --> CW
-    ECR_EKS --> EKS
-    ECR_AI --> SM
-    CW --> BUDGETS
-    BUDGETS --> REMEDIATION
-    REMEDIATION --> REDSHIFT
-    REMEDIATION --> APOUT
+        <h4 style="color:var(--accent); margin-top:20px;">IA Generativa / ML</h4>
+        <div class="mermaid">
+graph LR
+    GOLD["S3 Gold"] --> STUDIO["SageMaker Studio"]
+    STUDIO --> TRAIN["Training Jobs"]
+    TRAIN --> EP["SageMaker Endpoints"]
+    GOLD --> KB["Bedrock Knowledge Base"]
+    KB --> OPENSEARCH["OpenSearch Vectors"]
+    KB --> FM["Claude / Titan / Llama"]
+    FM --> AGENTS["Bedrock Agents"]
+    EP --> API["API Serving ML"]
+    FM --> API
+        </div>
+
+        <h4 style="color:var(--accent); margin-top:20px;">Chatbot RAG</h4>
+        <div class="mermaid">
+graph LR
+    PDFS["S3 PDFs"] --> KB["Knowledge Base"]
+    DATALAKE["S3 Gold - futuro"] -.-> KB
+    KB --> OPENSEARCH["OpenSearch Vectores"]
+    KB --> CLAUDE["Claude Haiku"]
+    USER["Usuario"] --> APICHAT["API /chat"]
+    APICHAT --> LAMBDACHAT["Lambda Chatbot"]
+    LAMBDACHAT --> KB
+        </div>
+
+        <h4 style="color:var(--accent); margin-top:20px;">Observabilidad</h4>
+        <div class="mermaid">
+graph LR
+    SERVICES["Todos los servicios"] --> CW["CloudWatch Metrics"]
+    CW --> DASH["7 Dashboards"]
+    CW --> ALARMS["Alarmas"]
+    ALARMS --> SNS["SNS Topics"]
+    SNS --> EMAIL["Email Equipo"]
+    SNS --> REMEDIATION["Lambda Remediacion"]
+    REMEDIATION --> PAUSE["Pausar Redshift"]
+    REMEDIATION --> THROTTLE["Throttle Lambdas"]
+    CRON["EventBridge 8AM"] --> REPORT["Lambda Reporte Diario"]
+    REPORT --> EMAIL
+        </div>
+
+        <h4 style="color:var(--accent); margin-top:20px;">Seguridad</h4>
+        <div class="mermaid">
+graph LR
+    KMS["KMS - Encriptacion"] --> S3["S3 Buckets"]
+    KMS --> RS["Redshift"]
+    KMS --> ECR["ECR"]
+    WAF["WAF"] --> APIGW["API Gateway"]
+    GD["GuardDuty"] --> S3
+    GD --> K8S["EKS Audit"]
+    CT["CloudTrail"] --> AUDIT["S3 Audit Logs"]
+    CONFIG["AWS Config"] --> RULES["S3 encriptado + no publico"]
+    MACIE["Macie PII"] --> S3
+    GUARDRAIL["Bedrock Guardrails"] --> BEDROCK["Modelos GenAI"]
+        </div>
+
+        <h4 style="color:var(--accent); margin-top:20px;">Control de Costos</h4>
+        <div class="mermaid">
+graph LR
+    BUDGETS["AWS Budgets"] --> ALERT50["Alerta 50%"]
+    BUDGETS --> ALERT80["Alerta 80%"]
+    BUDGETS --> ALERT100["Alerta 100%"]
+    ALERT80 --> SNS["SNS Critical"]
+    ALERT100 --> SNS
+    SNS --> LAMBDA["Lambda Remediacion"]
+    LAMBDA --> PAUSE["Pausar Redshift"]
+    LAMBDA --> THROTTLE["Throttle Lambdas"]
+    LAMBDA --> STOP["Parar todo"]
+    CRON["EventBridge Diario"] --> REPORT["Lambda Report"]
+    REPORT --> EMAILS["Email Lista Distribucion"]
+    PWA["PWA Amplify"] --> APICOSTS["API /costs"]
+    APICOSTS --> CE["Cost Explorer"]
         </div>
 
         <h3>Descripcion de cada capa</h3>
@@ -319,7 +363,25 @@ graph LR
                 <strong>Alarma:</strong> Si Macie detecta cualquier PII, se dispara alerta critica inmediata via SNS.</p>
             </div>
             <div class="spec-card">
-                <h4>13. Lambda Functions del Proyecto</h4>
+                <h4>13. Chatbot RAG (Retrieval Augmented Generation)</h4>
+                <p><strong>Proposito:</strong> Asistente de IA que responde preguntas basandose en documentos reales de la organizacion. Inicialmente usa PDFs subidos manualmente, despues se conecta al Data Lake (Gold) para responder con datos en vivo.<br><br>
+                <strong>Componentes:</strong><br>
+                - <strong>S3 Documents:</strong> Bucket donde se suben PDFs, manuales, reportes, politicas. Organizado en carpetas (pdfs/, data-lake/, otros/).<br>
+                - <strong>OpenSearch Serverless (Vector Store):</strong> Almacena embeddings de los documentos. Permite busqueda semantica — el chatbot encuentra parrafos relevantes aunque no coincidan palabras exactas.<br>
+                - <strong>Bedrock Knowledge Base:</strong> Orquesta el RAG. Toma la pregunta del usuario, busca contexto relevante en OpenSearch, y genera respuesta con Claude usando ese contexto.<br>
+                - <strong>Lambda Chatbot:</strong> Recibe la pregunta via API, llama a Bedrock RetrieveAndGenerate, devuelve respuesta + fuentes citadas.<br>
+                - <strong>API Gateway /chat:</strong> Endpoint POST que cualquier app (web, movil, Slack, Teams) puede consumir.<br><br>
+                <strong>Flujo:</strong><br>
+                1. Usuario sube PDFs a S3<br>
+                2. Se ejecuta ingestion job (chunking + embedding + indexado en OpenSearch)<br>
+                3. Usuario pregunta via API: "Cual es la politica de vacaciones?"<br>
+                4. Knowledge Base busca fragmentos relevantes en los PDFs<br>
+                5. Claude genera respuesta contextualizada citando las fuentes<br><br>
+                <strong>Fase 2 (posterior):</strong> Se agrega el bucket Gold del Data Lake como segundo data source. El chatbot podra responder preguntas sobre datos operativos en vivo (ventas, clientes, metricas) ademas de documentos.<br><br>
+                <strong>Costo:</strong> ~$25-30/mes (OpenSearch $24 + Bedrock Haiku $5-50 segun uso)</p>
+            </div>
+            <div class="spec-card">
+                <h4>14. Lambda Functions del Proyecto</h4>
                 <p>El data lake tiene 5 funciones Lambda, cada una con un proposito especifico:<br><br>
                 <strong>landing-processor</strong> (main.tf)<br>
                 Valida archivos que llegan al bucket Landing, los copia a Bronze con prefijo de fecha (year/month/day) y dispara el Glue Crawler para actualizar el catalogo. Se activa automaticamente via S3 Event Notification.<br><br>
@@ -1348,6 +1410,7 @@ graph TB
                     <tr><td><code>dashboard_costs.tf</code></td><td>Dashboard unificado de costos: gasto total, por servicio (16 servicios), proxies de consumo, alertas, remediacion, presupuestos</td></tr>
                     <tr><td><code>pwa_amplify.tf</code></td><td>Amplify App (hosting PWA), API Gateway + Lambda backend (/api/costs), CORS, deploy stage</td></tr>
                     <tr><td><code>pwa/</code></td><td>PWA instalable en iOS/Android: index.html, manifest.json, sw.js (service worker), iconos</td></tr>
+                    <tr><td><code>chatbot/</code></td><td>Modulo independiente: S3 docs, OpenSearch Serverless (vectores), Bedrock Knowledge Base, Lambda chatbot, API Gateway /chat. Deploy: cd chatbot && terraform apply</td></tr>
                     <tr><td><code>cost_control.tf</code></td><td>4 AWS Budgets (total, redshift, lambda+api, storage), Lambda remediacion (pausa/throttle), alarmas de costo, IAM role remediacion</td></tr>
                     <tr><td><code>accounts.tf</code></td><td>AWS Organizations, OU, 4 cuentas (sandbox, uat, preprod, prod), SCP region restrict. Condicional con enable_multi_account = true</td></tr>
                     <tr><td><code>iam.tf</code></td><td>glue_role, redshift_role, athena_role + politicas S3/Glue/Athena</td></tr>
@@ -1428,6 +1491,39 @@ graph TB
             <code>open http://localhost:8080</code> - Abrir en navegador<br>
         </div>
         <p class="detail-tip" style="margin-top:8px;">La PWA funciona con datos demo en local. Para datos reales, necesita el API Gateway desplegado. En iPhone: abre localhost:8080 en Safari y toca Compartir > Agregar a pantalla de inicio.</p>
+
+        <h3 style="margin-top:30px;">Desplegar solo el Chatbot RAG</h3>
+        <div class="commands">
+            <code>cd chatbot</code> - Ir al directorio del chatbot<br>
+            <code>terraform init</code> - Inicializar providers<br>
+            <code>terraform plan</code> - Ver que se va a crear<br>
+            <code>terraform apply -auto-approve</code> - Desplegar todo el chatbot<br>
+        </div>
+        <div class="detail-section" style="margin-top:12px;">
+            <h3>Uso del Chatbot (post-deploy)</h3>
+            <div class="commands">
+                <code>aws s3 cp mi-documento.pdf s3://bnx-chatbot-documents-dev/pdfs/ --profile sandboxaxel</code> - Subir PDFs<br>
+                <code>aws s3 cp carpeta-pdfs/ s3://bnx-chatbot-documents-dev/pdfs/ --recursive --profile sandboxaxel</code> - Subir carpeta completa<br><br>
+                <code>aws bedrock-agent start-ingestion-job \<br>
+                &nbsp;&nbsp;--knowledge-base-id $(cd chatbot && terraform output -raw knowledge_base_id) \<br>
+                &nbsp;&nbsp;--data-source-id $(cd chatbot && terraform output -raw data_source_id) \<br>
+                &nbsp;&nbsp;--region us-east-1 --profile sandboxaxel</code> - Sincronizar Knowledge Base<br><br>
+                <code>curl -X POST $(cd chatbot && terraform output -raw chatbot_api_url) \<br>
+                &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
+                &nbsp;&nbsp;-d '{"question": "De que trata el documento?"}'</code> - Hacer una pregunta<br>
+            </div>
+            <p class="detail-tip" style="margin-top:8px;">
+                Costo: ~$25-30/mes (OpenSearch Serverless $24 + Bedrock Haiku $5-50).<br>
+                El chatbot es independiente del lakehouse. Para conectar datos del data lake despues:<br>
+                <code>aws s3 sync s3://datalake-gold-dev/ s3://bnx-chatbot-documents-dev/data-lake/</code>
+            </p>
+        </div>
+
+        <h3 style="margin-top:30px;">Deploy con script (una sola linea)</h3>
+        <div class="commands">
+            <code>cd chatbot && ./deploy.sh</code> - Desplegar chatbot completo con resumen<br>
+            <code>cd .. && ./deploy_costs.sh</code> - Desplegar sistema de costos completo<br>
+        </div>
 
         <h3 style="margin-top:30px;">Vista previa del Dashboard de Costos en CloudWatch</h3>
         <div class="cloudwatch-preview">
@@ -1770,6 +1866,52 @@ graph TB
     mermaid.initialize({
         startOnLoad: true,
         theme: savedTheme === 'dark' ? 'dark' : 'default'
+    });
+
+    // Zoom In/Out del diagrama + drag
+    let archZoom = 1;
+    let archX = 0, archY = 0;
+    let isDragging = false, dragStartX = 0, dragStartY = 0;
+
+    function applyArchTransform() {
+        document.getElementById('arch-wrapper').style.transform =
+            'translate(' + archX + 'px, ' + archY + 'px) scale(' + archZoom + ')';
+    }
+    function zoomIn() { archZoom = Math.min(archZoom + 0.2, 3); applyArchTransform(); }
+    function zoomOut() { archZoom = Math.max(archZoom - 0.2, 0.3); applyArchTransform(); }
+    function zoomReset() { archZoom = 1; archX = 0; archY = 0; applyArchTransform(); }
+
+    // Drag para mover el diagrama
+    document.addEventListener('DOMContentLoaded', function() {
+        const container = document.getElementById('arch-wrapper').parentElement;
+        container.style.cursor = 'grab';
+
+        container.addEventListener('mousedown', function(e) {
+            isDragging = true;
+            dragStartX = e.clientX - archX;
+            dragStartY = e.clientY - archY;
+            container.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!isDragging) return;
+            archX = e.clientX - dragStartX;
+            archY = e.clientY - dragStartY;
+            applyArchTransform();
+        });
+        document.addEventListener('mouseup', function() {
+            isDragging = false;
+            const container = document.getElementById('arch-wrapper').parentElement;
+            container.style.cursor = 'grab';
+        });
+
+        // Zoom con scroll del mouse
+        container.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            if (e.deltaY < 0) { archZoom = Math.min(archZoom + 0.1, 3); }
+            else { archZoom = Math.max(archZoom - 0.1, 0.3); }
+            applyArchTransform();
+        });
     });
 
     // Fullscreen diagram

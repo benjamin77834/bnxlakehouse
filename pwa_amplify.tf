@@ -183,6 +183,8 @@ resource "aws_lambda_function" "pwa_api" {
       BUDGET_TOTAL       = var.budget_total
       ENVIRONMENT        = var.environment
       CROSS_ACCOUNT_ROLE = "arn:aws:iam::522189038734:role/datalake-cost-reader"
+      CACHE_BUCKET       = "${var.project_name}-athena-results-${var.environment}"
+      CALCULATOR_FN      = "${var.project_name}-cost-calculator-${var.environment}"
     }
   }
 

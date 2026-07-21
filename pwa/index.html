@@ -315,13 +315,14 @@ function render(data) {
     // Users
     const usersHtml = (data.users || []).map(u => {
         const initials = u.user.split('-').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+        const cost = u.est_cost ? `$${u.est_cost.toFixed(2)}` : '';
         return `<div class="user-row">
             <div class="user-avatar">${initials}</div>
             <div class="user-info">
                 <div class="user-name">${u.user}</div>
                 <div class="user-detail">${u.services.join(', ')} | ${u.top_events.slice(0,2).join(', ')}</div>
             </div>
-            <div class="user-actions">${u.actions} ops</div>
+            <div class="user-actions">${cost ? cost + ' | ' : ''}${u.actions} ops</div>
         </div>`;
     }).join('');
     document.getElementById('users-grid').innerHTML = usersHtml;

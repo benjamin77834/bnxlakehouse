@@ -482,6 +482,16 @@ resource "aws_iam_role_policy" "cost_report_permissions" {
           "sts:AssumeRole"
         ]
         Resource = ["arn:aws:iam::522189038734:role/datalake-cost-reader"]
+      },
+      {
+        Effect = "Allow"
+        Action = ["lambda:InvokeFunction"]
+        Resource = ["arn:aws:lambda:${var.aws_region}:*:function:${var.project_name}-cost-calculator-*"]
+      },
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject"]
+        Resource = ["arn:aws:s3:::${var.project_name}-athena-results-${var.environment}/*"]
       }
     ]
   })

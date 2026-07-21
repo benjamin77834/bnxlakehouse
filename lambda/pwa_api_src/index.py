@@ -3,184 +3,155 @@ import boto3
 import os
 from datetime import datetime, timedelta
 
-sts = boto3.client('sts')
+s3 = boto3.client('s3')
+lambda_client = boto3.client('lambda')
+cw = boto3.client('cloudwatch', region_name='us-east-1')
+ct = boto3.client('cloudtrail', region_name='us-east-1')
 
-CROSS_ACCOUNT_ROLE = os.environ.get(
-    'CROSS_ACCOUNT_ROLE',
-    'arn:aws:iam::522189038734:role/datalake-cost-reader'
-)
+CACHE_BUCKET = os.environ.get('CACHE_BUCKET', '')
+CACHE_KEY = 'cache/costs-daily.json'
+CALCULATOR_FN = os.environ.get('CALCULATOR_FN', '')
 
 
-def get_ce_client():
-    """Intenta asumir rol cross-account. Si falla, usa credenciales locales."""
-    # Primero intenta cross-account
+def get_cached_data():
+    """Cache deshabilitado para sandbox - siempre recalcula."""
+    return None
+
+
+def save_cache(data):
+    """Guarda en S3."""
+    if not CACHE_BUCKET:
+        return
     try:
-        resp = sts.assume_role(
-            RoleArn=CROSS_ACCOUNT_ROLE,
-            RoleSessionName='datalake-pwa-api'
-        )
-        creds = resp['Credentials']
-        session = boto3.Session(
-            aws_access_key_id=creds['AccessKeyId'],
-            aws_secret_access_key=creds['SecretAccessKey'],
-            aws_session_token=creds['SessionToken']
-        )
-        ce = session.client('ce', region_name='us-east-1')
-        # Verificar que puede leer datos
-        today = datetime.utcnow().date()
-        first = today.replace(day=1)
-        test = ce.get_cost_and_usage(
-            TimePeriod={'Start': first.isoformat(), 'End': today.isoformat()},
-            Granularity='MONTHLY',
-            Metrics=['UnblendedCost']
-        )
-        amount = float(test['ResultsByTime'][0]['Total']['UnblendedCost']['Amount'])
-        if amount > 0:
-            return ce, 'cross-account'
-        else:
-            print("Cross-account returned $0, falling back to local")
-            return boto3.client('ce', region_name='us-east-1'), 'local'
+        data['cache_date'] = datetime.utcnow().strftime('%Y-%m-%d')
+        s3.put_object(Bucket=CACHE_BUCKET, Key=CACHE_KEY, Body=json.dumps(data), ContentType='application/json')
     except Exception as e:
-        print(f"Cross-account failed ({e}), using local")
-        return boto3.client('ce', region_name='us-east-1'), 'local'
+        print(f"Cache error: {e}")
 
 
-def handler(event, context):
-    """
-    API backend para PWA de costos.
-    Intenta cross-account primero, fallback a cuenta local.
-    """
-    ce, source = get_ce_client()
-
-    today = datetime.utcnow().date()
-    first_of_month = today.replace(day=1)
-    yesterday = today - timedelta(days=1)
-    budget_total = float(os.environ.get('BUDGET_TOTAL', '5000'))
-
+def fetch_costs_from_calculator():
+    """Invoca la Lambda cost-calculator para obtener costos reales."""
+    if not CALCULATOR_FN:
+        return None
     try:
-        # Gasto acumulado del mes
-        month_cost = ce.get_cost_and_usage(
-            TimePeriod={
-                'Start': first_of_month.isoformat(),
-                'End': today.isoformat()
-            },
-            Granularity='MONTHLY',
-            Metrics=['UnblendedCost']
-        )
-        month_amount = float(
-            month_cost['ResultsByTime'][0]['Total']['UnblendedCost']['Amount']
-        )
-
-        # Gasto de ayer
-        daily_cost = ce.get_cost_and_usage(
-            TimePeriod={
-                'Start': yesterday.isoformat(),
-                'End': today.isoformat()
-            },
-            Granularity='DAILY',
-            Metrics=['UnblendedCost']
-        )
-        daily_amount = float(
-            daily_cost['ResultsByTime'][0]['Total']['UnblendedCost']['Amount']
-        )
-
-        # Proyeccion
-        days_elapsed = (today - first_of_month).days or 1
-        projected = (month_amount / days_elapsed) * 30
-
-        # Desglose por servicio
-        service_cost = ce.get_cost_and_usage(
-            TimePeriod={
-                'Start': first_of_month.isoformat(),
-                'End': today.isoformat()
-            },
-            Granularity='MONTHLY',
-            Metrics=['UnblendedCost'],
-            GroupBy=[{'Type': 'DIMENSION', 'Key': 'SERVICE'}]
-        )
-
-        services = []
-        for group in service_cost['ResultsByTime'][0]['Groups']:
-            svc_name = group['Keys'][0]
-            svc_amount = float(group['Metrics']['UnblendedCost']['Amount'])
-            if svc_amount > 0.01:
-                services.append({'name': svc_name, 'amount': round(svc_amount, 2)})
-        services.sort(key=lambda x: x['amount'], reverse=True)
-
+        resp = lambda_client.invoke(FunctionName=CALCULATOR_FN, InvocationType='RequestResponse')
+        payload = json.loads(resp['Payload'].read().decode())
+        body = json.loads(payload['body'])
+        return body
     except Exception as e:
-        print(f"Cost Explorer error: {e}")
-        month_amount = 0
-        daily_amount = 0
-        projected = 0
-        services = []
+        print(f"Calculator error: {e}")
+        return None
 
-    # Alarmas
-    alarms = []
-    try:
-        cw = boto3.client('cloudwatch', region_name='us-east-1')
-        alarms_resp = cw.describe_alarms(StateValue='ALARM')
-        for a in alarms_resp.get('MetricAlarms', []):
-            alarms.append({
-                'name': a['AlarmName'],
-                'status': 'critical',
-                'detail': a.get('AlarmDescription', '')
-            })
-    except Exception as e:
-        print(f"CloudWatch error: {e}")
 
-    # Actividad por usuario
+def fetch_users():
+    """Actividad por usuario con costo estimado."""
+    COST_MAP = {
+        'StartQueryExecution': 0.05, 'InvokeModel': 0.01, 'InvokeEndpoint': 0.005,
+        'StartJobRun': 0.50, 'StartCrawler': 0.10, 'PutObject': 0.000005,
+        'GetObject': 0.0000004, 'RunInstances': 0.10, 'InvokeFunction': 0.0000002,
+    }
     users_list = []
     try:
-        ct = boto3.client('cloudtrail', region_name='us-east-1')
-        events_resp = ct.lookup_events(
+        today = datetime.utcnow().date()
+        yesterday = today - timedelta(days=1)
+        resp = ct.lookup_events(
             StartTime=datetime(yesterday.year, yesterday.month, yesterday.day),
             EndTime=datetime(today.year, today.month, today.day),
             MaxResults=50
         )
-        users_activity = {}
-        for event in events_resp.get('Events', []):
-            username = event.get('Username', 'unknown')
-            event_source = event.get('EventSource', '')
-            event_name = event.get('EventName', '')
-            if username not in users_activity:
-                users_activity[username] = {
-                    'user': username, 'actions': 0,
-                    'services': set(), 'events': []
-                }
-            users_activity[username]['actions'] += 1
-            users_activity[username]['services'].add(
-                event_source.replace('.amazonaws.com', '')
-            )
-            if len(users_activity[username]['events']) < 5:
-                users_activity[username]['events'].append(event_name)
+        activity = {}
+        for ev in resp.get('Events', []):
+            user = ev.get('Username', 'unknown')
+            event_name = ev.get('EventName', '')
+            event_source = ev.get('EventSource', '').replace('.amazonaws.com', '')
+            if user not in activity:
+                activity[user] = {'user': user, 'actions': 0, 'services': set(), 'events': [], 'est_cost': 0.0}
+            activity[user]['actions'] += 1
+            activity[user]['services'].add(event_source)
+            if len(activity[user]['events']) < 5:
+                activity[user]['events'].append(event_name)
+            activity[user]['est_cost'] += COST_MAP.get(event_name, 0.001)
 
-        for ud in sorted(users_activity.values(), key=lambda x: x['actions'], reverse=True):
+        for u in sorted(activity.values(), key=lambda x: x['est_cost'], reverse=True):
             users_list.append({
-                'user': ud['user'],
-                'actions': ud['actions'],
-                'services': list(ud['services'])[:5],
-                'top_events': ud['events'][:5]
+                'user': u['user'], 'actions': u['actions'],
+                'services': list(u['services'])[:5], 'top_events': u['events'][:5],
+                'est_cost': round(u['est_cost'], 4)
             })
     except Exception as e:
         print(f"CloudTrail error: {e}")
+    return users_list
 
-    response = {
-        'total': round(month_amount, 2),
-        'budget': budget_total,
-        'daily': round(daily_amount, 2),
-        'projected': round(projected, 2),
-        'services': services[:15],
-        'alarms': alarms[:10],
-        'users': users_list[:10],
-        'source': source,
-        'updated': datetime.utcnow().isoformat()
-    }
 
+def handler(event, context):
+    """
+    PWA API - usa cost calculator (escaneo de recursos) con cache diario.
+    Costo: $0/mes (no usa Cost Explorer API).
+    Pasar ?refresh=1 o {"refresh":true} para forzar recalculo.
+    """
+    # Check force refresh
+    force = False
+    if isinstance(event, dict):
+        qs = event.get('queryStringParameters') or {}
+        body_str = event.get('body', '{}') or '{}'
+        try:
+            body_json = json.loads(body_str)
+            force = body_json.get('refresh', False)
+        except Exception:
+            pass
+        force = force or qs.get('refresh') == '1'
+
+    # Cache primero (a menos que sea force)
+    if not force:
+        cached = get_cached_data()
+        if cached:
+            cached['alarms'] = fetch_alarms()
+            cached['users'] = fetch_users()
+            cached['updated'] = datetime.utcnow().isoformat()
+            return ok(cached)
+
+    # Calcular costos via Lambda calculator
+    calc = fetch_costs_from_calculator()
+
+    if calc:
+        data = {
+            'total': calc['total'],
+            'budget': float(os.environ.get('BUDGET_TOTAL', '5000')),
+            'daily': calc['daily_avg'],
+            'projected': calc['projected_month'],
+            'services': calc['services_summary'],
+            'details': calc.get('details', [])[:20],
+            'method': calc['method'],
+            'from_cache': False
+        }
+    else:
+        data = {
+            'total': 0, 'budget': 5000, 'daily': 0, 'projected': 0,
+            'services': [], 'details': [], 'method': 'error', 'from_cache': False
+        }
+
+    data['alarms'] = fetch_alarms()
+    data['users'] = fetch_users()
+    data['updated'] = datetime.utcnow().isoformat()
+
+    save_cache(data)
+    return ok(data)
+
+
+def fetch_alarms():
+    alarms = []
+    try:
+        resp = cw.describe_alarms(StateValue='ALARM')
+        for a in resp.get('MetricAlarms', []):
+            alarms.append({'name': a['AlarmName'], 'status': 'critical', 'detail': a.get('AlarmDescription', '')})
+    except Exception:
+        pass
+    return alarms
+
+
+def ok(data):
     return {
         'statusCode': 200,
-        'headers': {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
-        },
-        'body': json.dumps(response)
+        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+        'body': json.dumps(data)
     }
