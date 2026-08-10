@@ -21,13 +21,13 @@ msk_instance_type   = "kafka.m5.large"
 msk_ebs_volume_size = 100
 
 # Sandbox (poner true para habilitar ambiente de pruebas)
-enable_sandbox             = false
-sandbox_athena_scan_limit  = 104857600  # 100 MB
+enable_devlabs             = false
+devlabs_athena_scan_limit  = 104857600  # 100 MB
 
 # Multi-Cuenta (poner true para crear cuentas separadas)
 enable_multi_account = false
 account_emails = {
-  sandbox = "datalake-sandbox@tuempresa.com"
+  devlabs = "datalake-devlabs@tuempresa.com"
   uat     = "datalake-uat@tuempresa.com"
   preprod = "datalake-preprod@tuempresa.com"
   prod    = "datalake-prod@tuempresa.com"

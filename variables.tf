@@ -97,14 +97,14 @@ variable "msk_ebs_volume_size" {
 # Variables de Sandbox (opcional)
 # -----------------------------------------------------------------------------
 
-variable "enable_sandbox" {
-  description = "Habilitar ambiente sandbox de pruebas aislado (true/false)"
+variable "enable_devlabs" {
+  description = "Habilitar ambiente devlabs de pruebas aislado (true/false)"
   type        = bool
   default     = false
 }
 
-variable "sandbox_athena_scan_limit" {
-  description = "Límite de bytes escaneados por query en Athena sandbox (100MB default)"
+variable "devlabs_athena_scan_limit" {
+  description = "Límite de bytes escaneados por query en Athena devlabs (100MB default)"
   type        = number
   default     = 104857600 # 100 MB
 }
@@ -123,7 +123,7 @@ variable "account_emails" {
   description = "Emails para cada cuenta (requerido si enable_multi_account = true)"
   type        = map(string)
   default = {
-    sandbox = "sandbox@example.com"
+    devlabs = "devlabs@example.com"
     uat     = "uat@example.com"
     preprod = "preprod@example.com"
     prod    = "prod@example.com"

@@ -23,7 +23,7 @@
             --green: #16a34a;
             --green-bg: #f0fdf4;
             --yellow: #b45309;
-            --yellow-bg: #f1f5f9;
+            --yellow-bg: #f8fafc;
             --red: #dc2626;
             --red-bg: #fef2f2;
             --purple: #7c3aed;
@@ -192,13 +192,175 @@ graph LR
         <h4 style="color:var(--accent); margin-top:20px;">Chatbot RAG</h4>
         <div class="mermaid">
 graph LR
-    PDFS["S3 PDFs"] --> KB["Knowledge Base"]
-    DATALAKE["S3 Gold - futuro"] -.-> KB
+    DOCS["S3 Docs + Gold"] --> KB["Bedrock Knowledge Base"]
     KB --> OPENSEARCH["OpenSearch Vectores"]
-    KB --> CLAUDE["Claude Haiku"]
+    KB --> CLAUDE["Claude + Guardrails"]
+    CLAUDE --> LAMBDA["Lambda /chat"]
+    LAMBDA --> AMPLIFY["Amplify PWA"]
+    LAMBDA --> PORTAL["Portal Sucursales"]
+    LAMBDA --> CANALES["Slack / Teams / WhatsApp"]
+    LAMBDA --> APPS["Apps Internas"]
+        </div>
+        <div class="detail-section" style="margin-top:10px; font-size:0.82rem;">
+            <h3 style="color:var(--accent);">Como funciona: flujo de una pregunta</h3>
+            <div class="mermaid">
+graph TD
+    U["Usuario pregunta: Cual es la politica de vacaciones?"] --> API["API /chat recibe POST"]
+    API --> LAMBDA["Lambda Chatbot procesa"]
+    LAMBDA --> KB["Knowledge Base: RetrieveAndGenerate"]
+    KB --> EMBED["Titan convierte pregunta en vector"]
+    EMBED --> SEARCH["OpenSearch busca los 5 fragmentos mas similares"]
+    SEARCH --> CONTEXT["Fragmentos encontrados se unen como contexto"]
+    CONTEXT --> CLAUDE["Claude recibe: contexto + pregunta"]
+    CLAUDE --> ANSWER["Claude genera respuesta citando fuentes"]
+    ANSWER --> GUARD["Guardrails filtra PII si existe"]
+    GUARD --> RESPONSE["Respuesta final + lista de fuentes PDF"]
+    RESPONSE --> U
+            </div>
+            <details class="accordion">
+                <summary>Ver ejemplo de request/response</summary>
+                <p><strong>Request:</strong><br><code>POST /chat</code><br><code>{"question": "Cual es la politica de vacaciones para empleados con mas de 5 anos?"}</code><br><br>
+                <strong>Response:</strong><br><code>{<br>&nbsp;&nbsp;"answer": "Segun la politica vigente, los empleados con mas de 5 anos tienen derecho a 20 dias habiles de vacaciones al ano. Pueden fraccionarlas en periodos minimos de 5 dias consecutivos...",<br>&nbsp;&nbsp;"sources": ["s3://docs/pdfs/politica-vacaciones-2024.pdf", "s3://docs/pdfs/manual-rh.pdf"],<br>&nbsp;&nbsp;"question": "Cual es la politica de vacaciones..."<br>}</code></p>
+            </details>
+            <details class="accordion">
+                <summary>Tiempos de respuesta</summary>
+                <p>
+                    Busqueda semantica (OpenSearch): ~50ms<br>
+                    Generacion con Claude Haiku: ~1-3 segundos<br>
+                    Generacion con Claude Sonnet: ~3-8 segundos<br>
+                    Total end-to-end: ~2-10 segundos segun modelo<br>
+                    Costo por pregunta: ~$0.001-0.01 (Haiku) o ~$0.01-0.05 (Sonnet)
+                </p>
+            </details>
+            <details class="accordion">
+                <summary>Que pasa si no encuentra respuesta</summary>
+                <p>
+                    Si OpenSearch no encuentra fragmentos relevantes (score < umbral), el chatbot responde:<br>
+                    <em>"No encontre informacion suficiente en los documentos disponibles para responder tu pregunta. Te sugiero consultar directamente con el area responsable."</em><br><br>
+                    No inventa respuestas — solo responde con lo que esta en los documentos (alucinaciones minimizadas por RAG).
+                </p>
+            </details>
+            <table class="detail-table">
+                <thead><tr><th>Componente</th><th>Funcion</th></tr></thead>
+                <tbody>
+                    <tr><td><strong>S3 Docs + Gold</strong></td><td>PDFs, manuales, politicas + datos operativos del lakehouse como fuentes de conocimiento</td></tr>
+                    <tr><td><strong>Bedrock Knowledge Base</strong></td><td>Orquesta RAG: recibe pregunta, busca contexto relevante, genera respuesta con Claude</td></tr>
+                    <tr><td><strong>OpenSearch Vectores</strong></td><td>Vector store para busqueda semantica (encuentra parrafos relevantes sin palabras exactas)</td></tr>
+                    <tr><td><strong>Claude + Guardrails</strong></td><td>Genera respuesta + filtra PII/contenido danino antes de devolver al usuario</td></tr>
+                    <tr><td><strong>Lambda /chat</strong></td><td>API serverless que conecta todo: recibe pregunta, invoca KB, devuelve respuesta + fuentes</td></tr>
+                    <tr><td><strong>Salidas</strong></td><td>PWA movil, portal de sucursales, canales de mensajeria (Slack/Teams/WhatsApp), apps internas</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h4 style="color:var(--accent); margin-top:30px;">Chatbot Propuesta 2 — Solo Lambda + S3 (Minimo costo)</h4>
+        <div class="mermaid">
+graph LR
+    DOCS["S3 PDFs"] --> INDEXER["Lambda Indexer"]
+    INDEXER --> FAISS["S3: indice FAISS + chunks JSON"]
     USER["Usuario"] --> APICHAT["API /chat"]
-    APICHAT --> LAMBDACHAT["Lambda Chatbot"]
-    LAMBDACHAT --> KB
+    APICHAT --> LAMBDA["Lambda Chatbot"]
+    LAMBDA --> FAISS
+    LAMBDA --> APIEXT["API Externa: Claude/GPT via HTTP"]
+    APIEXT --> LAMBDA
+    LAMBDA --> AMPLIFY["Amplify / Canales"]
+        </div>
+        <div class="detail-section" style="margin-top:10px; font-size:0.82rem;">
+            <h3 style="color:var(--accent);">Propuesta 2: RAG con Lambda + FAISS + API externa (sin AWS AI)</h3>
+            <p style="color:var(--text-secondary); margin-bottom:12px;">Arquitectura minimalista: todo corre en Lambda + S3. El modelo se invoca via API HTTP (Anthropic, OpenAI o cualquier proveedor). Sin Bedrock, sin OpenSearch, sin SageMaker.</p>
+
+            <details class="accordion">
+                <summary>Como funciona</summary>
+                <p>
+                    1. <strong>Indexacion (una vez):</strong> Lambda toma PDFs de S3, extrae texto, divide en chunks de 300 palabras, genera embeddings con modelo ligero incluido en el zip de Lambda (sentence-transformers ONNX, ~50MB), y guarda indice FAISS + chunks como archivos en S3.<br><br>
+                    2. <strong>Consulta:</strong> Lambda recibe pregunta, descarga indice FAISS de S3 (cabe en /tmp de Lambda), busca los 5 chunks mas similares, construye prompt con contexto, y llama a la API de Anthropic/OpenAI via HTTPS.<br><br>
+                    3. <strong>Respuesta:</strong> La API externa genera la respuesta. Lambda la devuelve al usuario via API Gateway. Todo en ~3-5 segundos.
+                </p>
+            </details>
+            <details class="accordion">
+                <summary>Componentes</summary>
+                <p>
+                    <strong>S3 Docs:</strong> Bucket con PDFs (mismo que Propuesta 1).<br>
+                    <strong>Lambda Indexer:</strong> Procesa PDFs (PyPDF2), genera embeddings (ONNX runtime), guarda FAISS index en S3. Trigger: S3 event cuando se sube un PDF.<br>
+                    <strong>S3 Indice:</strong> Archivo FAISS (~10-100MB) + chunks.json con el texto. Sin base de datos, solo archivos.<br>
+                    <strong>Lambda Chatbot:</strong> 512MB-1GB RAM, 60s timeout. Carga FAISS en /tmp, busca, llama API, responde. Costo: ~$0.000008 por invocacion.<br>
+                    <strong>API Externa (HTTP):</strong> Anthropic API ($0.00025/1K tokens Haiku) o OpenAI ($0.0005/1K tokens GPT-4o-mini). Se paga directo al proveedor, no a AWS.<br>
+                    <strong>API Gateway:</strong> Endpoint /chat. Mismo que Propuesta 1.<br>
+                    <strong>Secrets Manager:</strong> Guarda API key de Anthropic/OpenAI ($0.40/mes).
+                </p>
+            </details>
+            <details class="accordion">
+                <summary>Costos</summary>
+                <p>
+                    <table class="detail-table">
+                        <thead><tr><th>Concepto</th><th>Propuesta 1 (Bedrock)</th><th>Propuesta 2 (Lambda puro)</th></tr></thead>
+                        <tbody>
+                            <tr><td>Vector Store</td><td>OpenSearch: ~$24/mes</td><td>FAISS en S3: ~$0.01/mes</td></tr>
+                            <tr><td>Modelo LLM</td><td>Bedrock Claude: $0.00025/1K tok</td><td>Anthropic API directo: $0.00025/1K tok</td></tr>
+                            <tr><td>Embeddings</td><td>Titan: incluido en KB</td><td>ONNX en Lambda: $0 (incluido en zip)</td></tr>
+                            <tr><td>Orquestacion</td><td>Bedrock KB: incluido</td><td>Lambda custom: $0 (free tier)</td></tr>
+                            <tr><td>Infra fija mensual</td><td><strong>~$24/mes</strong> (OpenSearch min)</td><td><strong>~$0.50/mes</strong> (S3 + Secrets)</td></tr>
+                            <tr><td>100 preguntas/dia</td><td><strong>~$30/mes</strong></td><td><strong>~$3/mes</strong></td></tr>
+                            <tr><td>1,000 preguntas/dia</td><td><strong>~$55/mes</strong></td><td><strong>~$25/mes</strong></td></tr>
+                        </tbody>
+                    </table>
+                </p>
+            </details>
+            <details class="accordion">
+                <summary>Ventajas y limitaciones</summary>
+                <p>
+                    <strong>Ventajas:</strong><br>
+                    - Costo casi cero en infra AWS (~$0.50/mes fijo)<br>
+                    - Solo pagas tokens que usas (al proveedor)<br>
+                    - Deploy en 5 minutos (1 Lambda + 1 bucket)<br>
+                    - Sin servicios managed complejos<br>
+                    - Funciona en cualquier cuenta AWS sin activar Bedrock<br><br>
+                    <strong>Limitaciones:</strong><br>
+                    - Sin Guardrails PII integrado (hay que hacerlo manual en Lambda)<br>
+                    - FAISS tiene limite de ~100K documentos en Lambda /tmp (512MB)<br>
+                    - Depende de API externa (latencia de red, disponibilidad)<br>
+                    - Sin fine-tuning ni modelos custom<br>
+                    - API key sale de la cuenta AWS (datos viajan a Anthropic/OpenAI)
+                </p>
+            </details>
+            <details class="accordion">
+                <summary>Cuando elegir esta propuesta</summary>
+                <p>
+                    - Presupuesto muy limitado (&lt;$5/mes)<br>
+                    - POC rapido (quieres probar en 1 hora)<br>
+                    - Pocos documentos (&lt;1,000 PDFs)<br>
+                    - No necesitas Guardrails enterprise<br>
+                    - OK con que datos viajen a API externa<br>
+                    - No tienes Bedrock habilitado en la cuenta
+                </p>
+            </details>
+
+            <h3 style="color:var(--accent); margin-top:20px;">Alternativas de modelo SIN API externa</h3>
+            <table class="detail-table">
+                <thead><tr><th>Opcion</th><th>Modelo</th><th>Donde corre</th><th>Costo/mes</th><th>Calidad</th><th>Latencia</th></tr></thead>
+                <tbody>
+                    <tr style="background:var(--green-bg);"><td><strong>A. ECS Fargate + GPU ⭐</strong></td><td>Llama 3 8B / Mistral 7B</td><td>Contenedor ECS con GPU</td><td>~$360-1,080 (24/7) o ~$50 (on-demand)</td><td>Alta</td><td>2-5s</td></tr>
+                    <tr><td><strong>B. EKS (pod GPU)</strong></td><td>Llama 3 8B / Mistral 7B</td><td>Pod en cluster EKS existente</td><td>~$0 extra (si ya tienes nodo GPU)</td><td>Alta</td><td>2-5s</td></tr>
+                    <tr><td><strong>C. Lambda + modelo tiny</strong></td><td>TinyLlama 1.1B / Phi-3-mini</td><td>Dentro de Lambda (ONNX)</td><td>~$0 (free tier)</td><td>Baja-Media</td><td>10-30s</td></tr>
+                    <tr><td><strong>D. HuggingFace Endpoints</strong></td><td>Llama 3 / Mistral / Falcon</td><td>Hosting managed HF</td><td>~$430 (24/7) o pay-per-use</td><td>Alta</td><td>2-5s</td></tr>
+                    <tr><td><strong>E. Solo busqueda (sin LLM)</strong></td><td>Ninguno</td><td>Lambda + FAISS</td><td>~$0</td><td>N/A (devuelve parrafos)</td><td>&lt;1s</td></tr>
+                </tbody>
+            </table>
+
+            <details class="accordion">
+                <summary>⭐ Recomendacion: Opcion A (ECS Fargate on-demand)</summary>
+                <p>
+                    <strong>Por que es la mejor opcion sin API externa:</strong><br><br>
+                    - <strong>Datos privados:</strong> El modelo corre dentro de tu VPC, nada sale a internet<br>
+                    - <strong>On-demand:</strong> El contenedor se enciende solo cuando hay preguntas (Fargate Spot ~$0.01/min)<br>
+                    - <strong>Calidad alta:</strong> Llama 3 8B es comparable a Claude Haiku en calidad de respuesta<br>
+                    - <strong>Sin vendor lock-in:</strong> Puedes cambiar de modelo cuando quieras (Mistral, Falcon, Qwen)<br>
+                    - <strong>Costo real:</strong> Si el chatbot se usa 2 horas/dia = ~$50/mes. Si es 24/7 = ~$360/mes<br>
+                    - <strong>Escalable:</strong> Fargate auto-escala si hay muchas preguntas simultaneas<br><br>
+                    <strong>Flujo:</strong> Lambda recibe pregunta → busca en FAISS → envia contexto a contenedor ECS → modelo genera → Lambda devuelve<br><br>
+                    <strong>Para POC rapido:</strong> Empieza con Opcion C (modelo tiny en Lambda, $0) para validar el flujo, y despues migra a Opcion A para produccion.
+                </p>
+            </details>
         </div>
 
         <h4 style="color:var(--accent); margin-top:20px;">Observabilidad</h4>
@@ -214,6 +376,36 @@ graph LR
     REMEDIATION --> THROTTLE["Throttle Lambdas"]
     CRON["EventBridge 8AM"] --> REPORT["Lambda Reporte Diario"]
     REPORT --> EMAIL
+        </div>
+        <div style="margin-top:10px;">
+            <details class="accordion">
+                <summary>📊 Dashboard 1: General</summary>
+                <p>Vista ejecutiva de salud del data lake. Muestra: S3 objetos y tamano por bucket, Lambda invocaciones y errores, Redshift queries por segundo.</p>
+            </details>
+            <details class="accordion">
+                <summary>📥 Dashboard 2: Ingesta</summary>
+                <p>Lambda landing-processor: duracion promedio y p99, ejecuciones concurrentes. MSK Kafka: bytes in/out por segundo, consumer lag estimado.</p>
+            </details>
+            <details class="accordion">
+                <summary>⚙️ Dashboard 3: ETL</summary>
+                <p>Glue Jobs: duracion, bytes leidos/escritos, records procesados. Crawlers: tablas creadas/actualizadas. Glue Data Catalog: total de tablas registradas.</p>
+            </details>
+            <details class="accordion">
+                <summary>🔍 Dashboard 4: Analitica</summary>
+                <p>Athena: datos escaneados (bytes), tiempo de ejecucion por query. Redshift: RPUs consumidos, duracion de queries, conexiones activas.</p>
+            </details>
+            <details class="accordion">
+                <summary>🤖 Dashboard 5: IA/ML</summary>
+                <p>SageMaker Endpoints: invocaciones, latencia de modelo, overhead. Bedrock: invocaciones por modelo, tokens input/output, latencia.</p>
+            </details>
+            <details class="accordion">
+                <summary>🚀 Dashboard 6: Serving</summary>
+                <p>API Gateway: requests totales, latencia promedio y p99, errores 4xx/5xx. Lambda serving-gold y serving-ml: performance y throttles.</p>
+            </details>
+            <details class="accordion">
+                <summary>💰 Dashboard 7: Costos Unificado</summary>
+                <p>Gasto total estimado (calculado por resource-scan), desglose por servicio en barras, actividad por usuario, estado de presupuestos, remediaciones ejecutadas.</p>
+            </details>
         </div>
 
         <h4 style="color:var(--accent); margin-top:20px;">Seguridad</h4>
@@ -247,6 +439,120 @@ graph LR
     REPORT --> EMAILS["Email Lista Distribucion"]
     PWA["PWA Amplify"] --> APICOSTS["API /costs"]
     APICOSTS --> CE["Cost Explorer"]
+        </div>
+
+        <h3>Diagrama de Conectividad de Red</h3>
+        <a href="https://app.diagrams.net/#Uhttps%3A%2F%2Fraw.githubusercontent.com%2Fbenjamin77834%2Fbnxlakehouse%2Fmain%2Fdocs%2Farquitectura_aws.drawio" target="_blank" class="fullscreen-btn" style="text-decoration:none; margin-bottom:12px; display:inline-block;">📐 Abrir en Draw.io (editable con iconos AWS)</a>
+        <div class="mermaid">
+graph LR
+    subgraph ONPREM["🏢 ON-PREMISE - CDMX (Zona C)"]
+        CORE["🏦 Core Bancario"]
+        SAP["📦 SAP / ERP"]
+        ORACLE["🗄️ Oracle DB"]
+        MAINFRAME["💻 Mainframe"]
+        APIS_INT["🔌 APIs Internas REST"]
+        LDAP["🔐 LDAP / AD"]
+    end
+
+    subgraph NETWORK["🌐 Conectividad"]
+        RVPX["🛡️ RVPX Gateway - mTLS + Rate Limit"]
+        DX["⚡ Direct Connect 1Gbps - Enlace Privado"]
+    end
+
+    subgraph AWS["☁️ AWS Region us-east-1 / mx-central-1"]
+        subgraph VPC["🔒 VPC Privada"]
+            TGW["🔀 Transit Gateway"]
+            PRIV["Subnets Privadas - Redshift, MSK, EKS"]
+            PUB["Subnets Publicas - NAT, ALB"]
+        end
+
+        subgraph LAKE["💾 Data Lakehouse"]
+            S3["🪣 S3 Bronze/Silver/Gold"]
+            GLUE["⚙️ Glue ETL"]
+            RS["📊 Redshift"]
+        end
+
+        subgraph CHAT["🤖 Chatbot RAG"]
+            APIGW["🌐 API Gateway /chat"]
+            LBD["⚡ Lambda"]
+            KB["🧠 Bedrock Knowledge Base"]
+            OS["🔍 OpenSearch Vectores"]
+        end
+    end
+
+    subgraph SALIDAS["📱 Canales de Salida"]
+        PWA["📱 Amplify PWA"]
+        PORTAL["🏪 Portal Sucursales"]
+        SLACK["💬 Slack / Teams"]
+        WA["📲 WhatsApp"]
+    end
+
+    CORE & SAP & ORACLE & MAINFRAME & APIS_INT --> RVPX
+    RVPX --> DX
+    DX --> TGW
+    TGW --> PRIV & PUB
+    PRIV --> S3 & RS
+    S3 --> GLUE --> S3
+    S3 --> KB
+    KB --> OS
+    APIGW --> LBD --> KB
+    LBD --> APIS_INT
+    APIGW --> PWA & PORTAL & SLACK & WA
+        </div>
+
+        <div class="detail-section" style="margin-top:10px; font-size:0.82rem;">
+            <h3 style="color:var(--accent);">Explicacion del flujo de conectividad</h3>
+            <table class="detail-table">
+                <thead><tr><th>Capa</th><th>Componente</th><th>Funcion</th></tr></thead>
+                <tbody>
+                    <tr><td rowspan="3"><strong>On-Premise (Zona C)</strong></td><td>Core Bancario / Mainframe</td><td>Fuentes transaccionales: cuentas, movimientos, clientes. Datos que alimentan el data lake via ETL.</td></tr>
+                    <tr><td>APIs Internas</td><td>Servicios REST/SOAP que exponen datos de sistemas legacy. El chatbot puede consultarlas en tiempo real.</td></tr>
+                    <tr><td>LDAP / Active Directory</td><td>Autenticacion de usuarios. Valida quien puede acceder al chatbot y a que datos.</td></tr>
+                    <tr><td rowspan="3"><strong>RVPX (Proxy Inverso)</strong></td><td>Gateway RVPX</td><td>Punto unico de salida de la red corporativa. Todo trafico a AWS pasa por aqui. Controla que conexiones se permiten.</td></tr>
+                    <tr><td>Autenticacion mTLS</td><td>Certificados mutuos entre on-premise y AWS. Garantiza que ambos extremos son legitimos (no man-in-the-middle).</td></tr>
+                    <tr><td>Rate Limiting</td><td>Limita cantidad de requests por segundo hacia AWS. Previene saturacion del Direct Connect.</td></tr>
+                    <tr><td rowspan="2"><strong>Direct Connect</strong></td><td>Enlace 1Gbps</td><td>Conexion fisica dedicada entre datacenter Banamex y AWS. No pasa por internet publico (latencia baja, seguro).</td></tr>
+                    <tr><td>Virtual Interface Privada</td><td>Canal logico dentro del Direct Connect que conecta directo a la VPC privada (sin internet).</td></tr>
+                    <tr><td rowspan="4"><strong>AWS VPC</strong></td><td>Transit Gateway</td><td>Hub central de red en AWS. Conecta Direct Connect con multiples subnets y servicios.</td></tr>
+                    <tr><td>Subnets Privadas</td><td>Donde corren Redshift, MSK, Neptune, EKS. Sin acceso directo desde internet.</td></tr>
+                    <tr><td>Subnets Publicas</td><td>Donde esta el NAT Gateway y ALB. Permiten salida a internet (para APIs externas).</td></tr>
+                    <tr><td>NAT Gateway</td><td>Permite a servicios privados (Lambda, ECS) acceder a internet (ej: llamar API de Anthropic) sin exponerse.</td></tr>
+                    <tr><td rowspan="2"><strong>Data Lakehouse</strong></td><td>S3 + Glue + Redshift</td><td>Recibe datos de on-premise via Direct Connect, los procesa (Bronze → Silver → Gold) y los hace disponibles para consulta.</td></tr>
+                    <tr><td>Athena</td><td>Permite a usuarios de on-premise hacer queries SQL sobre el data lake via JDBC a traves del Direct Connect.</td></tr>
+                    <tr><td rowspan="3"><strong>Chatbot RAG</strong></td><td>API Gateway /chat</td><td>Endpoint que recibe preguntas. Accesible desde on-premise via Direct Connect o desde internet via HTTPS.</td></tr>
+                    <tr><td>Lambda + Bedrock KB</td><td>Procesa la pregunta, busca en documentos, genera respuesta. Puede consultar APIs internas de on-premise via Direct Connect.</td></tr>
+                    <tr><td>OpenSearch Vectores</td><td>Almacena embeddings de documentos internos. Los PDFs se suben desde on-premise via Direct Connect a S3.</td></tr>
+                    <tr><td rowspan="3"><strong>Salidas</strong></td><td>Amplify PWA</td><td>Portal web de costos y chat. Accesible desde internet (empleados con VPN) o red corporativa.</td></tr>
+                    <tr><td>Portal Sucursales</td><td>Integra el chatbot para que personal de sucursal haga preguntas sobre productos y politicas.</td></tr>
+                    <tr><td>Canales</td><td>Slack/Teams (corporativo) y WhatsApp (clientes externos) consumen el API /chat.</td></tr>
+                </tbody>
+            </table>
+
+            <details class="accordion">
+                <summary>Flujo del Chatbot end-to-end con On-Premise</summary>
+                <p>
+                    1. <strong>Empleado en sucursal</strong> abre el Portal Sucursales y pregunta: "Cual es el limite de transferencia para clientes preferentes?"<br><br>
+                    2. Request viaja por <strong>red corporativa → RVPX</strong> (autentica, rate-limit) → <strong>Direct Connect</strong> (enlace privado) → <strong>VPC AWS</strong><br><br>
+                    3. <strong>API Gateway /chat</strong> recibe el POST. Valida headers, pasa a <strong>Lambda Chatbot</strong><br><br>
+                    4. Lambda consulta <strong>Bedrock Knowledge Base</strong>: busca en OpenSearch fragmentos relevantes de documentos de politicas (subidos previamente desde on-premise)<br><br>
+                    5. Opcionalmente, Lambda llama a una <strong>API interna de on-premise</strong> (via Direct Connect de vuelta) para obtener datos actualizados del Core Bancario (ej: limites vigentes)<br><br>
+                    6. <strong>Claude</strong> genera respuesta combinando: contexto de documentos + datos frescos del core. Guardrails filtra PII<br><br>
+                    7. Respuesta viaja de regreso: Lambda → API GW → <strong>Direct Connect</strong> → RVPX → Portal Sucursal → Empleado<br><br>
+                    8. <strong>Tiempo total:</strong> ~3-5 segundos. <strong>Datos sensibles nunca tocan internet publico.</strong>
+                </p>
+            </details>
+
+            <details class="accordion">
+                <summary>Seguridad del flujo</summary>
+                <p>
+                    - <strong>En transito:</strong> mTLS en RVPX + Direct Connect privado (no internet) + TLS 1.3 en API Gateway<br>
+                    - <strong>En reposo:</strong> KMS encripta S3, OpenSearch, Redshift<br>
+                    - <strong>Acceso:</strong> Lake Formation controla que datos puede ver cada rol<br>
+                    - <strong>PII:</strong> Bedrock Guardrails filtra antes de responder + Macie escanea semanalmente<br>
+                    - <strong>Auditoria:</strong> CloudTrail registra toda llamada al chatbot (quien pregunto que, cuando)<br>
+                    - <strong>Red:</strong> Security Groups restringen puertos, WAF protege API Gateway de ataques
+                </p>
+            </details>
         </div>
 
         <h3>Descripcion de cada capa</h3>
@@ -341,11 +647,11 @@ graph LR
             <div class="spec-card">
                 <h4>11. Multi-Cuenta (AWS Organizations)</h4>
                 <p>Estrategia de cuentas separadas para aislamiento total entre ambientes. Cada cuenta tiene su propia facturacion, IAM, y red. Habilitado con <code>enable_multi_account = true</code>.<br><br>
-                <strong>Sandbox:</strong> Experimentacion libre, SCP restringe a 1 sola region, datos efimeros.<br>
+                <strong>DevLabs:</strong> Experimentacion libre, SCP restringe a 1 sola region, datos efimeros.<br>
                 <strong>UAT:</strong> Pruebas de aceptacion con datos anonimizados de produccion.<br>
                 <strong>PreProd:</strong> Replica exacta de produccion para validacion final antes de deploy.<br>
                 <strong>Produccion:</strong> Ambiente productivo con todos los controles de seguridad y compliance.<br><br>
-                <strong>SCP (Service Control Policies):</strong> Politicas que restringen lo que cada cuenta puede hacer (ej: sandbox solo puede usar us-east-1).</p>
+                <strong>SCP (Service Control Policies):</strong> Politicas que restringen lo que cada cuenta puede hacer (ej: devlabs solo puede usar us-east-1).</p>
             </div>
             <div class="spec-card">
                 <h4>12. Proteccion de Datos (PII / Confidencial)</h4>
@@ -511,7 +817,126 @@ graph TD
     end
         </div>
 
-        <h3>Detalle de permisos por rol</h3>
+        <h3>Roles de Usuario (Personas)</h3>
+        <div class="iam-detail-grid">
+            <div class="iam-card">
+                <h4>👷 Data Engineer</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Construir y mantener pipelines de datos (ETL), asegurar calidad y disponibilidad de datos en todas las capas</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">glue_role</span> <span class="policy-managed">lambda_role</span> <span class="policy-managed">athena_role</span></li>
+                    <li><strong>Acceso:</strong> Bronze (read/write), Silver (read/write), Gold (read)</li>
+                    <li>Glue: crear/ejecutar jobs y crawlers</li>
+                    <li>Athena: queries en todas las capas</li>
+                    <li>S3: upload a Landing y Bronze</li>
+                    <li>MSK Kafka: producir y consumir topics</li>
+                    <li>CloudWatch: ver logs de Glue/Lambda</li>
+                    <li>Lake Formation: permisos de tabla completa</li>
+                    <li><em>No puede:</em> crear endpoints ML, modificar IAM, acceder a produccion</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🔬 Data Scientist</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Explorar datos, entrenar modelos de ML, experimentar con algoritmos y validar hipotesis sobre los datos Gold</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">sagemaker_role</span> <span class="policy-managed">bedrock_role</span> <span class="policy-managed">athena_role</span></li>
+                    <li><strong>Acceso:</strong> Silver (read), Gold (read), Artifacts (read/write)</li>
+                    <li>SageMaker Studio: notebooks, experimentos, training</li>
+                    <li>SageMaker: crear endpoints de inferencia</li>
+                    <li>Bedrock: invocar modelos, crear Knowledge Bases</li>
+                    <li>Athena: queries en Silver y Gold</li>
+                    <li>ECR: push imagenes ai-training, ai-inference</li>
+                    <li>Lake Formation: solo SELECT en tablas Gold</li>
+                    <li><em>No puede:</em> escribir en Bronze/Silver, modificar ETL, acceder a Landing</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>📊 Analista de Datos</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Generar reportes, dashboards y analisis de negocio. Responder preguntas de negocio con datos Gold</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">athena_role</span> <span class="policy-managed">redshift_role</span></li>
+                    <li><strong>Acceso:</strong> Gold (read-only)</li>
+                    <li>Athena: queries solo en Gold</li>
+                    <li>Redshift: SELECT en tablas Gold (Spectrum)</li>
+                    <li>QuickSight / BI tools: lectura</li>
+                    <li>Lake Formation: SELECT en tablas Gold, columnas restringidas</li>
+                    <li><em>No puede:</em> ver Bronze/Silver, ejecutar Glue, acceder a SageMaker, ver PII</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🤖 ML Engineer</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Llevar modelos a produccion: desplegar endpoints, monitorear performance, escalar inferencia y mantener pipelines ML</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">sagemaker_role</span> <span class="policy-managed">bedrock_role</span> <span class="policy-managed">lambda_role</span> <span class="policy-managed">apigw_role</span></li>
+                    <li><strong>Acceso:</strong> Gold (read), Artifacts (read/write)</li>
+                    <li>SageMaker: crear/gestionar endpoints, pipelines</li>
+                    <li>ECR: push/pull todas las imagenes de IA</li>
+                    <li>Bedrock: invocar modelos, gestionar agents</li>
+                    <li>Lambda: desplegar serving-ml</li>
+                    <li>API Gateway: configurar endpoints de inferencia</li>
+                    <li><em>No puede:</em> modificar ETL, escribir en Bronze/Silver, ver datos raw</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🏗️ Platform Engineer / DevOps</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Desplegar y mantener la infraestructura del data lake. Terraform, CI/CD, monitoreo, escalamiento y disponibilidad</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">eks_cluster_role</span> <span class="policy-managed">eks_node_role</span> <span class="policy-managed">lambda_role</span> <span class="policy-managed">config_role</span></li>
+                    <li><strong>Acceso:</strong> Infraestructura completa</li>
+                    <li>Terraform: apply/destroy todos los recursos</li>
+                    <li>EKS: administrar cluster y nodos</li>
+                    <li>ECR: gestionar todos los repositorios</li>
+                    <li>IAM: crear/modificar roles (con restricciones)</li>
+                    <li>CloudWatch: dashboards, alarmas, logs</li>
+                    <li>Seguridad: KMS, WAF, GuardDuty, Config</li>
+                    <li><em>No puede:</em> ver datos de negocio (PII), invocar modelos Bedrock, queries en Athena</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>💼 Product Owner / Negocio</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Consumir insights del data lake. Tomar decisiones de negocio basadas en datos, KPIs y predicciones de modelos</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">athena_role</span> (solo vistas Gold)</li>
+                    <li><strong>Acceso:</strong> Solo lectura dashboards</li>
+                    <li>CloudWatch: ver dashboards de costos</li>
+                    <li>PWA: ver costos y alarmas</li>
+                    <li>Athena: queries predefinidas (vistas Gold)</li>
+                    <li>QuickSight: dashboards de BI</li>
+                    <li>Chatbot: hacer preguntas via API /chat</li>
+                    <li><em>No puede:</em> modificar infraestructura, acceder a consola AWS directamente</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>🔒 Security / Compliance</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Garantizar cumplimiento regulatorio, detectar vulnerabilidades, auditar accesos y proteger datos sensibles (PII)</li>
+                    <li><strong>Roles IAM:</strong> <span class="policy-managed">config_role</span> (read-only a GuardDuty, Macie, CloudTrail)</li>
+                    <li><strong>Acceso:</strong> Auditoria y compliance</li>
+                    <li>CloudTrail: ver todos los logs de auditoria</li>
+                    <li>GuardDuty: findings de amenazas</li>
+                    <li>Macie: resultados de escaneo PII</li>
+                    <li>AWS Config: estado de compliance</li>
+                    <li>Lake Formation: ver permisos otorgados</li>
+                    <li>KMS: ver uso de llaves (no rotar)</li>
+                    <li><em>No puede:</em> modificar datos, ejecutar queries, desplegar infra</li>
+                </ul>
+            </div>
+            <div class="iam-card">
+                <h4>👑 Admin / Arquitecto</h4>
+                <ul>
+                    <li><strong>Funcion:</strong> Disenar la arquitectura, definir estandares, gestionar permisos y supervisar el data lake completo</li>
+                    <li><strong>Roles IAM:</strong> Todos (AdministratorAccess + MFA obligatorio)</li>
+                    <li><strong>Acceso:</strong> Total (con MFA obligatorio)</li>
+                    <li>Lake Formation: administrar permisos</li>
+                    <li>IAM: crear/modificar cualquier rol</li>
+                    <li>Organizations: gestionar cuentas</li>
+                    <li>Billing: ver costos completos</li>
+                    <li>Todos los servicios sin restriccion</li>
+                    <li><em>Restriccion:</em> MFA obligatorio, CloudTrail registra todo</li>
+                </ul>
+            </div>
+        </div>
+
+        <h3>Detalle de permisos por rol (servicios AWS)</h3>
         <div class="iam-detail-grid">
             <div class="iam-card">
                 <h4>🔄 glue_role</h4>
@@ -759,11 +1184,11 @@ graph TD
 
         <h3 style="margin-top:30px;">Comparación de Escenarios</h3>
         <div class="scenarios">
-            <div class="scenario sandbox">
-                <h4>🧪 Sandbox (opcional)</h4>
+            <div class="scenario devlabs">
+                <h4>🧪 DevLabs (opcional)</h4>
                 <span class="scenario-price">~$45/mes</span>
                 <ul>
-                    <li>enable_sandbox = true</li>
+                    <li>enable_devlabs = true</li>
                     <li>S3 Bronze/Silver/Gold aislados</li>
                     <li>Redshift 4 RPU (minimo)</li>
                     <li>Athena con limite 100MB/query</li>
@@ -1303,11 +1728,11 @@ graph TD
             <div class="control-card">
                 <div class="control-header">
                     <span class="control-icon">🧪</span>
-                    <span class="control-name">Sandbox Completo</span>
+                    <span class="control-name">DevLabs Completo</span>
                 </div>
                 <div class="control-actions">
-                    <button class="ctrl-btn btn-green" onclick="copyCmd('terraform apply -var=\"enable_sandbox=true\" -auto-approve')">Activar</button>
-                    <button class="ctrl-btn btn-red" onclick="copyCmd('terraform apply -var=\"enable_sandbox=false\" -auto-approve')">Desactivar</button>
+                    <button class="ctrl-btn btn-green" onclick="copyCmd('terraform apply -var=\"enable_devlabs=true\" -auto-approve')">Activar</button>
+                    <button class="ctrl-btn btn-red" onclick="copyCmd('terraform apply -var=\"enable_devlabs=false\" -auto-approve')">Desactivar</button>
                 </div>
             </div>
         </div>
@@ -1359,7 +1784,7 @@ graph TB
         IAM_COMP["iam_compute.tf - Roles: Lambda, APIGW, EKS"]
         STREAMING["streaming.tf - MSK Kafka cluster"]
         SERVING["outputs_serving.tf - API GW, Lambdas serving, SageMaker Domain"]
-        SANDBOX["sandbox.tf - Ambiente aislado opcional"]
+        DEVLABS["devlabs.tf - Ambiente aislado opcional"]
         OBS["observability.tf - Dashboards, alarmas, logs"]
         SEC["security.tf - KMS, WAF, GuardDuty, CloudTrail, Config"]
         VARS["variables.tf - Inputs"]
@@ -1393,34 +1818,109 @@ graph TB
     IAM_COMP --> ROLES_R
         </div>
 
-        <h3 style="margin-top:30px;">Recursos por archivo</h3>
+        <h3 style="margin-top:30px;">Artefactos por Capa</h3>
+
         <div class="detail-section">
+            <h3 style="color:var(--green);">FUNDACIONAL (Lakehouse + Gobierno + Observabilidad)</h3>
+            <p style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:10px;">Base de datos, procesamiento, seguridad y monitoreo. Se despliega primero. No depende de IA.</p>
+            <div style="display:flex; gap:20px; margin-bottom:12px;">
+                <div style="background:var(--green-bg); padding:8px 16px; border-radius:8px; border:1px solid var(--green);">
+                    <span style="color:var(--text-muted); font-size:0.7rem;">COSTO MENSUAL</span><br>
+                    <strong style="color:var(--green); font-size:1.2rem;">~$150 - $4,000</strong>
+                </div>
+                <div style="background:var(--green-bg); padding:8px 16px; border-radius:8px; border:1px solid var(--green);">
+                    <span style="color:var(--text-muted); font-size:0.7rem;">COSTO ANUAL</span><br>
+                    <strong style="color:var(--green); font-size:1.2rem;">~$1,800 - $48,000</strong>
+                </div>
+                <div style="background:var(--green-bg); padding:8px 16px; border-radius:8px; border:1px solid var(--green);">
+                    <span style="color:var(--text-muted); font-size:0.7rem;">DESGLOSE</span><br>
+                    <span style="color:var(--text-secondary); font-size:0.75rem;">S3 $23-920 | Glue $9-660 | Athena $2-300 | Redshift $90-8,640 | MSK $460 | Observabilidad $4 | Seguridad $25</span>
+                </div>
+            </div>
             <table class="detail-table">
-                <thead><tr><th>Archivo</th><th>Recursos</th></tr></thead>
+                <thead><tr><th>Archivo</th><th>Capa</th><th>Recursos</th></tr></thead>
                 <tbody>
-                    <tr><td><code>main.tf</code></td><td>S3 Landing + Bronze + Silver + Gold + Athena Results, Glue Catalog Database, 2 Glue Crawlers, Athena Workgroup, Redshift Namespace + Workgroup, Security Group, Lambda landing-processor, S3 Event Notification</td></tr>
-                    <tr><td><code>streaming.tf</code></td><td>MSK Kafka cluster (3 brokers), Security Group MSK, CloudWatch Log Group</td></tr>
-                    <tr><td><code>outputs_serving.tf</code></td><td>API Gateway REST, Lambda serving-gold, Lambda serving-ml, SageMaker Domain (Studio Unified)</td></tr>
-                    <tr><td><code>sandbox.tf</code></td><td>S3 sandbox (bronze/silver/gold), Glue DB + Crawler, Athena workgroup con limite, Redshift 4 RPU, SageMaker notebook. Todo condicional con enable_sandbox = true</td></tr>
-                    <tr><td><code>observability.tf</code></td><td>7 CloudWatch Dashboards (General, Ingesta, ETL, Analitica, IA/ML, Serving, Costos), 5 Alarmas criticas, SNS Topics, Log Groups centralizados</td></tr>
-                    <tr><td><code>security.tf</code></td><td>KMS key + alias, WAF Web ACL (rate limit + SQLi + OWASP), GuardDuty detector, CloudTrail + S3 bucket auditoria, AWS Config recorder + 2 reglas compliance, IAM role Config</td></tr>
-                    <tr><td><code>ecr.tf</code></td><td>8 repositorios ECR (eks-services, eks-jobs, eks-ingestion, ai-training, ai-inference, ai-agents, ai-pipelines, etl-custom) + lifecycle policies + scan on push + KMS</td></tr>
-                    <tr><td><code>data_protection.tf</code></td><td>Macie (3 classification jobs Bronze/Silver/Gold), Bedrock Guardrail (PII filter + content filter), alarma PII detectada</td></tr>
-                    <tr><td><code>neptune.tf</code></td><td>Neptune cluster + instancia + subnet group + security group (grafos, lineaje, knowledge graphs)</td></tr>
-                    <tr><td><code>dashboard_costs.tf</code></td><td>Dashboard unificado de costos: gasto total, por servicio (16 servicios), proxies de consumo, alertas, remediacion, presupuestos</td></tr>
-                    <tr><td><code>pwa_amplify.tf</code></td><td>Amplify App (hosting PWA), API Gateway + Lambda backend (/api/costs), CORS, deploy stage</td></tr>
-                    <tr><td><code>pwa/</code></td><td>PWA instalable en iOS/Android: index.html, manifest.json, sw.js (service worker), iconos</td></tr>
-                    <tr><td><code>chatbot/</code></td><td>Modulo independiente: S3 docs, OpenSearch Serverless (vectores), Bedrock Knowledge Base, Lambda chatbot, API Gateway /chat. Deploy: cd chatbot && terraform apply</td></tr>
-                    <tr><td><code>cost_control.tf</code></td><td>4 AWS Budgets (total, redshift, lambda+api, storage), Lambda remediacion (pausa/throttle), alarmas de costo, IAM role remediacion</td></tr>
-                    <tr><td><code>accounts.tf</code></td><td>AWS Organizations, OU, 4 cuentas (sandbox, uat, preprod, prod), SCP region restrict. Condicional con enable_multi_account = true</td></tr>
-                    <tr><td><code>iam.tf</code></td><td>glue_role, redshift_role, athena_role + politicas S3/Glue/Athena</td></tr>
-                    <tr><td><code>iam_ai.tf</code></td><td>sagemaker_role, bedrock_role + S3 Artifacts bucket + politicas S3/Glue/ECR/Bedrock</td></tr>
-                    <tr><td><code>iam_compute.tf</code></td><td>lambda_role, apigw_role, eks_cluster_role, eks_node_role + politicas S3/Glue/Athena/SQS/SNS/VPC/MSK/SageMaker</td></tr>
-                    <tr><td><code>variables.tf</code></td><td>region, project_name, environment, vpc_id, subnet_ids, redshift config</td></tr>
-                    <tr><td><code>outputs.tf</code></td><td>ARNs de buckets, roles, endpoints de Redshift, nombres de workgroups</td></tr>
-                    <tr><td><code>locals.tf</code></td><td>Tags comunes (Project, Environment, ManagedBy)</td></tr>
+                    <tr><td><code>main.tf</code></td><td>Lakehouse</td><td>S3 (Landing, Bronze, Silver, Gold, Athena Results), Glue Catalog + 2 Crawlers, Athena Workgroup, Redshift Serverless, Lambda landing-processor, S3 Events</td></tr>
+                    <tr><td><code>streaming.tf</code></td><td>Ingesta</td><td>MSK Kafka cluster (3 brokers), Security Group, CloudWatch Log Group</td></tr>
+                    <tr><td><code>lake_formation.tf</code></td><td>Gobierno</td><td>Permisos por tabla/columna para cada rol (Glue, Athena, SageMaker, Redshift, Lambda)</td></tr>
+                    <tr><td><code>security.tf</code></td><td>Seguridad</td><td>KMS, WAF, GuardDuty, CloudTrail, AWS Config + reglas compliance</td></tr>
+                    <tr><td><code>data_protection.tf</code></td><td>Seguridad</td><td>Macie PII (3 scans), Bedrock Guardrails (PII filter)</td></tr>
+                    <tr><td><code>observability.tf</code></td><td>Observabilidad</td><td>6 CloudWatch Dashboards, 5 Alarmas criticas, SNS, Log Groups</td></tr>
+                    <tr><td><code>dashboard_costs.tf</code></td><td>Costos</td><td>Dashboard unificado de costos (metricas custom DataLake/Costs)</td></tr>
+                    <tr><td><code>cost_control.tf</code></td><td>Costos</td><td>4 Budgets, Lambda remediacion, Lambda reporte diario, EventBridge cron, SNS</td></tr>
+                    <tr><td><code>cost_calculator.tf</code></td><td>Costos</td><td>Lambda que escanea recursos y publica costos en CloudWatch</td></tr>
+                    <tr><td><code>neptune.tf</code></td><td>Lakehouse</td><td>Neptune cluster (grafos, lineaje de datos)</td></tr>
+                    <tr><td><code>ecr.tf</code></td><td>Contenedores</td><td>8 repos ECR (EKS + ETL) + lifecycle + scan vulnerabilidades</td></tr>
+                    <tr><td><code>devlabs.tf</code></td><td>Ambientes</td><td>Ambiente aislado opcional (enable_devlabs=true)</td></tr>
+                    <tr><td><code>accounts.tf</code></td><td>Ambientes</td><td>Multi-cuenta Organizations (enable_multi_account=true)</td></tr>
+                    <tr><td><code>iam.tf</code></td><td>IAM</td><td>Roles: Glue, Redshift, Athena</td></tr>
+                    <tr><td><code>iam_compute.tf</code></td><td>IAM</td><td>Roles: Lambda, API GW, EKS cluster + nodes</td></tr>
+                    <tr><td><code>variables.tf</code></td><td>Config</td><td>Todas las variables de entrada</td></tr>
+                    <tr><td><code>outputs.tf</code></td><td>Config</td><td>ARNs, endpoints, URLs</td></tr>
+                    <tr><td><code>locals.tf</code></td><td>Config</td><td>Tags comunes</td></tr>
                 </tbody>
             </table>
+        </div>
+
+        <div class="detail-section">
+            <h3 style="color:var(--accent);">IA GENERATIVA / ML + CHATBOT</h3>
+            <p style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:10px;">Modelos, inferencia, RAG y chatbot. Se despliega despues de la fundacion. Consume datos del Lakehouse.</p>
+            <div style="display:flex; gap:20px; margin-bottom:12px;">
+                <div style="background:var(--cyan-bg); padding:8px 16px; border-radius:8px; border:1px solid var(--accent);">
+                    <span style="color:var(--text-muted); font-size:0.7rem;">COSTO MENSUAL</span><br>
+                    <strong style="color:var(--accent); font-size:1.2rem;">~$30 - $5,000</strong>
+                </div>
+                <div style="background:var(--cyan-bg); padding:8px 16px; border-radius:8px; border:1px solid var(--accent);">
+                    <span style="color:var(--text-muted); font-size:0.7rem;">COSTO ANUAL</span><br>
+                    <strong style="color:var(--accent); font-size:1.2rem;">~$360 - $60,000</strong>
+                </div>
+                <div style="background:var(--cyan-bg); padding:8px 16px; border-radius:8px; border:1px solid var(--accent);">
+                    <span style="color:var(--text-muted); font-size:0.7rem;">DESGLOSE</span><br>
+                    <span style="color:var(--text-secondary); font-size:0.75rem;">OpenSearch $24 | Bedrock $5-2,700 | SageMaker $8-3,100 | ECR $5 | Serving Lambda <$1</span>
+                </div>
+            </div>
+            <table class="detail-table">
+                <thead><tr><th>Archivo</th><th>Capa</th><th>Recursos</th></tr></thead>
+                <tbody>
+                    <tr><td><code>iam_ai.tf</code></td><td>IAM</td><td>Roles: SageMaker, Bedrock + S3 Artifacts bucket</td></tr>
+                    <tr><td><code>outputs_serving.tf</code></td><td>Serving</td><td>API Gateway REST, Lambda serving-gold, Lambda serving-ml, SageMaker Domain</td></tr>
+                    <tr><td><code>ecr.tf</code> (parcial)</td><td>Contenedores</td><td>4 repos ECR IA (ai-training, ai-inference, ai-agents, ai-pipelines)</td></tr>
+                    <tr><td><code>chatbot/main.tf</code></td><td>Chatbot</td><td>Provider, variables, tags</td></tr>
+                    <tr><td><code>chatbot/s3.tf</code></td><td>Chatbot</td><td>S3 bucket para PDFs y documentos</td></tr>
+                    <tr><td><code>chatbot/opensearch.tf</code></td><td>Chatbot</td><td>OpenSearch Serverless (vector store para RAG)</td></tr>
+                    <tr><td><code>chatbot/bedrock.tf</code></td><td>Chatbot</td><td>Knowledge Base + Data Source S3</td></tr>
+                    <tr><td><code>chatbot/iam.tf</code></td><td>Chatbot</td><td>Roles: Bedrock KB, Lambda chatbot</td></tr>
+                    <tr><td><code>chatbot/api.tf</code></td><td>Chatbot</td><td>API Gateway /chat + Lambda + CORS</td></tr>
+                    <tr><td><code>chatbot/outputs.tf</code></td><td>Chatbot</td><td>URLs, instrucciones de uso</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section">
+            <h3 style="color:var(--purple);">PORTAL Y MONITOREO</h3>
+            <p style="color:var(--text-secondary); font-size:0.8rem; margin-bottom:10px;">Herramientas de visualizacion y control. Complementarias a ambas capas.</p>
+            <table class="detail-table">
+                <thead><tr><th>Archivo</th><th>Capa</th><th>Recursos</th></tr></thead>
+                <tbody>
+                    <tr><td><code>pwa_amplify.tf</code></td><td>PWA</td><td>Amplify App, API Gateway + Lambda pwa-api (costos real-time)</td></tr>
+                    <tr><td><code>pwa/</code></td><td>PWA</td><td>App instalable iOS/Android: costos, alarmas, usuarios</td></tr>
+                    <tr><td><code>docs/index.html</code></td><td>Portal</td><td>Documentacion interactiva: arquitectura, costos, terraform, control</td></tr>
+                    <tr><td><code>docs/proyecto_datalake.html</code></td><td>Portal</td><td>Documento PDF del proyecto (para creditos AWS)</td></tr>
+                    <tr><td><code>deploy_costs.sh</code></td><td>Scripts</td><td>Deploy completo del sistema de costos (1 comando)</td></tr>
+                    <tr><td><code>chatbot/deploy.sh</code></td><td>Scripts</td><td>Deploy completo del chatbot RAG (1 comando)</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="detail-section" style="background:var(--green-bg); border-color:var(--green);">
+            <h3 style="color:var(--green);">Orden de despliegue recomendado</h3>
+            <ol class="tips-list">
+                <li><strong>Paso 1 - Fundacion:</strong> <code>terraform apply</code> (sin VPC = solo serverless: S3, Glue, Athena, Lambda, observabilidad)</li>
+                <li><strong>Paso 2 - Red:</strong> Configurar vpc_id + subnet_ids → <code>terraform apply</code> (agrega Redshift, Neptune, MSK, EKS)</li>
+                <li><strong>Paso 3 - Costos:</strong> <code>./deploy_costs.sh</code> (PWA + dashboards + alertas + reportes)</li>
+                <li><strong>Paso 4 - IA:</strong> Conectar Gold al chatbot, entrenar modelos en SageMaker, configurar Bedrock Agents</li>
+                <li><strong>Paso 5 - Chatbot:</strong> <code>cd chatbot && ./deploy.sh</code> (independiente, solo S3 + Bedrock + OpenSearch)</li>
+            </ol>
         </div>
 
         <h3 style="margin-top:30px;">Comandos</h3>
@@ -1430,7 +1930,7 @@ graph TB
             <code>terraform fmt</code> - Formatea archivos .tf<br>
             <code>terraform plan</code> - Muestra cambios pendientes<br>
             <code>terraform apply</code> - Aplica la infraestructura<br>
-            <code>terraform apply -var="enable_sandbox=true"</code> - Aplica con sandbox<br>
+            <code>terraform apply -var="enable_devlabs=true"</code> - Aplica con devlabs<br>
             <code>terraform destroy</code> - Elimina todo<br>
             <code>terraform workspace new uat</code> - Crear ambiente UAT separado<br>
             <code>terraform state list</code> - Lista recursos creados<br>
@@ -1502,12 +2002,12 @@ graph TB
         <div class="detail-section" style="margin-top:12px;">
             <h3>Uso del Chatbot (post-deploy)</h3>
             <div class="commands">
-                <code>aws s3 cp mi-documento.pdf s3://bnx-chatbot-documents-dev/pdfs/ --profile sandboxaxel</code> - Subir PDFs<br>
-                <code>aws s3 cp carpeta-pdfs/ s3://bnx-chatbot-documents-dev/pdfs/ --recursive --profile sandboxaxel</code> - Subir carpeta completa<br><br>
+                <code>aws s3 cp mi-documento.pdf s3://bnx-chatbot-documents-dev/pdfs/ --profile devlabsaxel</code> - Subir PDFs<br>
+                <code>aws s3 cp carpeta-pdfs/ s3://bnx-chatbot-documents-dev/pdfs/ --recursive --profile devlabsaxel</code> - Subir carpeta completa<br><br>
                 <code>aws bedrock-agent start-ingestion-job \<br>
                 &nbsp;&nbsp;--knowledge-base-id $(cd chatbot && terraform output -raw knowledge_base_id) \<br>
                 &nbsp;&nbsp;--data-source-id $(cd chatbot && terraform output -raw data_source_id) \<br>
-                &nbsp;&nbsp;--region us-east-1 --profile sandboxaxel</code> - Sincronizar Knowledge Base<br><br>
+                &nbsp;&nbsp;--region us-east-1 --profile devlabsaxel</code> - Sincronizar Knowledge Base<br><br>
                 <code>curl -X POST $(cd chatbot && terraform output -raw chatbot_api_url) \<br>
                 &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
                 &nbsp;&nbsp;-d '{"question": "De que trata el documento?"}'</code> - Hacer una pregunta<br>
@@ -1524,6 +2024,15 @@ graph TB
             <code>cd chatbot && ./deploy.sh</code> - Desplegar chatbot completo con resumen<br>
             <code>cd .. && ./deploy_costs.sh</code> - Desplegar sistema de costos completo<br>
         </div>
+
+        <h3 style="margin-top:30px;">Descargar reportes de costos</h3>
+        <div class="commands">
+            <code>aws cloudwatch get-metric-data --metric-data-queries '[{"Id":"total","MetricStat":{"Metric":{"Namespace":"DataLake/Costs","MetricName":"TotalCostEstimated"},"Period":86400,"Stat":"Maximum"}}]' --start-time $(date -v-30d +%Y-%m-%dT00:00:00Z) --end-time $(date +%Y-%m-%dT23:59:59Z) --region us-east-1 --profile devlabsaxel --output json > reporte-cloudwatch.json</code> - Bajar metricas de CloudWatch (30 dias)<br><br>
+            <code>curl -s https://33xa56ia6g.execute-api.us-east-1.amazonaws.com/dev/api/costs | python3 -m json.tool > reporte-api.json</code> - Bajar reporte de la API (JSON)<br><br>
+            <code>aws lambda invoke --function-name datalake-cost-calculator-dev --region us-east-1 --profile devlabsaxel reporte-recursos.json && python3 -m json.tool reporte-recursos.json</code> - Bajar escaneo completo de recursos<br><br>
+            <code>aws cloudwatch get-dashboard --dashboard-name datalake-costos-unificado-dev --region us-east-1 --profile devlabsaxel --output json > dashboard-export.json</code> - Exportar dashboard completo
+        </div>
+        <p class="detail-tip" style="margin-top:8px;">En la PWA (app movil) toca el boton "Descargar" en la barra inferior para obtener un CSV con costos por servicio y actividad por usuario.</p>
 
         <h3 style="margin-top:30px;">Vista previa del Dashboard de Costos en CloudWatch</h3>
         <div class="cloudwatch-preview">
@@ -1667,7 +2176,7 @@ graph TB
         margin-bottom: 12px; padding: 4px 12px; border-radius: 6px;
     }
     .scenario.dev .scenario-price { color: var(--green); background: var(--green-bg); }
-    .scenario.sandbox .scenario-price { color: var(--cyan); background: var(--cyan-bg); }
+    .scenario.devlabs .scenario-price { color: var(--cyan); background: var(--cyan-bg); }
     .scenario.uat .scenario-price { color: var(--purple); background: var(--purple-bg); }
     .scenario.prod .scenario-price { color: var(--yellow); background: var(--yellow-bg); }
     .scenario.heavy .scenario-price { color: var(--red); background: var(--red-bg); }
@@ -1778,6 +2287,21 @@ graph TB
     footer {
         text-align: center; padding: 30px; margin-top: 40px;
         border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.85rem;
+    }
+    .accordion {
+        background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+        margin: 6px 0; overflow: hidden;
+    }
+    .accordion summary {
+        padding: 10px 14px; cursor: pointer; font-size: 0.88rem; font-weight: 600;
+        color: var(--text-primary); list-style: none;
+    }
+    .accordion summary::-webkit-details-marker { display: none; }
+    .accordion summary::before { content: "▸ "; color: var(--accent); }
+    .accordion[open] summary::before { content: "▾ "; }
+    .accordion[open] summary { border-bottom: 1px solid var(--border); }
+    .accordion p {
+        padding: 10px 14px; font-size: 0.8rem; color: var(--text-secondary); margin: 0;
     }
     .cloudwatch-preview {
         background: #1a1a2e; border-radius: 12px; border: 1px solid #334155;

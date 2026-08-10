@@ -43,6 +43,12 @@
     <h1>💰 Data Lake Costs</h1>
     <p id="last-update">Cargando...</p>
     <button class="refresh-btn" onclick="loadData()">↻ Refresh</button>
+    <div style="margin-top:10px;">
+        <select id="account-select" onchange="switchAccount(this.value)" style="background:var(--border);color:var(--text);border:1px solid var(--muted);border-radius:6px;padding:6px 10px;font-size:0.8rem;width:100%;">
+            <option value="datalab">DataLab (107094296911)</option>
+            <option value="sandboxaxel">SandboxAxel (729743892637)</option>
+        </select>
+    </div>
 </div>
 <div class="content">
     <!-- Total Card -->
@@ -187,14 +193,24 @@
 <div class="nav-bar">
     <div class="nav-item active"><span>💰</span>Costos</div>
     <div class="nav-item"><span>🚨</span>Alarmas</div>
-    <div class="nav-item"><span>📊</span>Métricas</div>
+    <div class="nav-item" onclick="downloadReport()"><span>📥</span>Descargar</div>
     <div class="nav-item"><span>⚙️</span>Config</div>
 </div>
 
 <script>
-const API_URL = window.location.hostname === 'localhost'
-    ? 'http://localhost:3000/api'
-    : 'https://33xa56ia6g.execute-api.us-east-1.amazonaws.com/dev/api';
+const ACCOUNTS = {
+    'datalab': {
+        name: 'DataLab (107094296911)',
+        api: 'https://9x3psnph08.execute-api.us-east-1.amazonaws.com/dev/api'
+    },
+    'sandboxaxel': {
+        name: 'SandboxAxel (729743892637)',
+        api: 'https://33xa56ia6g.execute-api.us-east-1.amazonaws.com/dev/api'
+    }
+};
+let currentAccount = 'datalab';
+
+const API_URL = ACCOUNTS[currentAccount].api;
 
 const SERVICES_META = {
     'Amazon Redshift': { icon: '📊', budget: 2000 },
@@ -249,8 +265,14 @@ const DEMO_DATA = {
     ]
 };
 
+function switchAccount(account) {
+    currentAccount = account;
+    loadData();
+}
+
 function loadData() {
-    fetch(API_URL + '/costs')
+    const api = ACCOUNTS[currentAccount].api;
+    fetch(api + '/costs')
         .then(r => r.json())
         .then(data => render(data))
         .catch(err => {
@@ -341,5 +363,42 @@ setInterval(loadData, 300000);
 // Register service worker
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js');
+}
+
+// Descargar reporte como CSV/JSON
+function downloadReport() {
+    const api = ACCOUNTS[currentAccount].api;
+    fetch(api + '/costs')
+        .then(r => r.json())
+        .then(data => {
+            const now = new Date().toISOString().split('T')[0];
+            // CSV
+            let csv = 'Servicio,Costo USD,Fecha\n';
+            (data.services || []).forEach(s => {
+                csv += `"${s.name}",${s.amount},${now}\n`;
+            });
+            csv += `\nTotal,${data.total},${now}\n`;
+            csv += `Proyeccion Mes,${data.projected},${now}\n`;
+            csv += `Promedio Diario,${data.daily},${now}\n`;
+
+            if (data.users && data.users.length) {
+                csv += '\nUsuario,Acciones,Servicios,Costo Est\n';
+                data.users.forEach(u => {
+                    csv += `"${u.user}",${u.actions},"${(u.services||[]).join('; ')}",${u.est_cost || 0}\n`;
+                });
+            }
+
+            const blob = new Blob([csv], {type: 'text/csv'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `reporte-costos-${now}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        })
+        .catch(() => {
+            // Fallback con datos demo
+            alert('No se pudo conectar a la API. Verifica la conexion.');
+        });
 }
 </script>

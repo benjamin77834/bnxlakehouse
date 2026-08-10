@@ -130,24 +130,24 @@ output "lambda_serving_ml_arn" {
 
 # Sandbox Outputs (solo si está habilitado)
 
-output "sandbox_enabled" {
-  description = "Si el sandbox está habilitado"
-  value       = var.enable_sandbox
+output "devlabs_enabled" {
+  description = "Si el devlabs está habilitado"
+  value       = var.enable_devlabs
 }
 
-output "sandbox_bronze_bucket" {
-  description = "Bucket Bronze del sandbox"
-  value       = var.enable_sandbox ? aws_s3_bucket.sandbox_bronze[0].bucket : null
+output "devlabs_bronze_bucket" {
+  description = "Bucket Bronze del devlabs"
+  value       = var.enable_devlabs ? aws_s3_bucket.devlabs_bronze[0].bucket : null
 }
 
-output "sandbox_athena_workgroup" {
-  description = "Workgroup de Athena del sandbox"
-  value       = var.enable_sandbox ? aws_athena_workgroup.sandbox[0].name : null
+output "devlabs_athena_workgroup" {
+  description = "Workgroup de Athena del devlabs"
+  value       = var.enable_devlabs ? aws_athena_workgroup.devlabs[0].name : null
 }
 
-output "sandbox_redshift_endpoint" {
-  description = "Endpoint de Redshift sandbox"
-  value       = var.enable_sandbox && length(var.subnet_ids) > 0 ? aws_redshiftserverless_workgroup.sandbox[0].endpoint : null
+output "devlabs_redshift_endpoint" {
+  description = "Endpoint de Redshift devlabs"
+  value       = var.enable_devlabs && length(var.subnet_ids) > 0 ? aws_redshiftserverless_workgroup.devlabs[0].endpoint : null
 }
 
 # ECR Outputs

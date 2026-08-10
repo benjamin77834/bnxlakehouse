@@ -203,7 +203,7 @@
 <h2>5.1 Escenarios</h2>
 <table>
     <tr><th>Escenario</th><th>Costo Mensual</th><th>Descripción</th></tr>
-    <tr><td>Sandbox</td><td>~$45</td><td>Ambiente aislado mínimo para experimentar</td></tr>
+    <tr><td>DevLabs</td><td>~$45</td><td>Ambiente aislado mínimo para experimentar</td></tr>
     <tr><td>Desarrollo/POC</td><td>~$158</td><td>100 GB, Redshift 4 RPU 2h/día, free tier Lambda</td></tr>
     <tr><td>UAT (4 semanas)</td><td>~$959/ciclo</td><td>200 GB, Redshift 8 RPU, solo horario laboral</td></tr>
     <tr><td>Producción Moderada</td><td>~$4,441</td><td>2 TB, Redshift 32 RPU 6h/día, EKS 3 nodos, Bedrock</td></tr>
@@ -228,7 +228,7 @@
 </table>
 
 <div class="cost-box">
-    <strong>Créditos AWS necesarios para prueba completa en Sandbox:</strong><br>
+    <strong>Créditos AWS necesarios para prueba completa en DevLabs:</strong><br>
     Mínimo recomendado: <strong>$500 USD</strong> (cubre 2 meses de desarrollo + UAT)<br>
     Ideal: <strong>$1,000 USD</strong> (cubre 3 meses con todos los servicios activos)
 </div>
@@ -251,7 +251,7 @@
     <tr><td>observability.tf</td><td>6 CloudWatch Dashboards, alarmas, SNS, Log Groups</td></tr>
     <tr><td>dashboard_costs.tf</td><td>Dashboard unificado de costos (16 servicios)</td></tr>
     <tr><td>cost_control.tf</td><td>Budgets, Lambda remediación, Lambda reporte diario, EventBridge cron</td></tr>
-    <tr><td>sandbox.tf</td><td>Ambiente aislado opcional (enable_sandbox=true)</td></tr>
+    <tr><td>devlabs.tf</td><td>Ambiente aislado opcional (enable_devlabs=true)</td></tr>
     <tr><td>accounts.tf</td><td>AWS Organizations multi-cuenta (opcional)</td></tr>
     <tr><td>pwa_amplify.tf</td><td>Amplify App + API Gateway + Lambda PWA backend</td></tr>
     <tr><td>variables.tf</td><td>Todas las variables de entrada</td></tr>
@@ -301,8 +301,8 @@
     <li><strong>Seguridad enterprise:</strong> Encriptación, WAF, PII detection, auditoría completa</li>
     <li><strong>IA integrada:</strong> SageMaker + Bedrock + Guardrails desde el día 1</li>
     <li><strong>Observabilidad total:</strong> 7 dashboards, alarmas, reportes diarios, PWA móvil</li>
-    <li><strong>Multi-ambiente:</strong> Sandbox, UAT, PreProd, Prod con aislamiento por cuenta</li>
-    <li><strong>Escalable:</strong> De $45/mes (sandbox) a enterprise ($27K+/mes) sin cambiar arquitectura</li>
+    <li><strong>Multi-ambiente:</strong> DevLabs, UAT, PreProd, Prod con aislamiento por cuenta</li>
+    <li><strong>Escalable:</strong> De $45/mes (devlabs) a enterprise ($27K+/mes) sin cambiar arquitectura</li>
 </ul>
 
 <h2>7.2 Diferenciadores</h2>
@@ -319,7 +319,7 @@
 <div class="cost-box">
     <p><strong>Créditos solicitados:</strong> $1,000 USD</p>
     <p><strong>Periodo:</strong> 3 meses</p>
-    <p><strong>Uso:</strong> Validación completa de la plataforma en ambiente Sandbox incluyendo todos los servicios de IA Generativa (Bedrock, SageMaker), procesamiento (Glue, Athena, Redshift) y streaming (MSK Kafka).</p>
+    <p><strong>Uso:</strong> Validación completa de la plataforma en ambiente DevLabs incluyendo todos los servicios de IA Generativa (Bedrock, SageMaker), procesamiento (Glue, Athena, Redshift) y streaming (MSK Kafka).</p>
     <p><strong>Entregables:</strong> Plataforma funcional con datos reales, dashboards de costos activos, reportes automatizados, y documentación completa.</p>
 </div>
 

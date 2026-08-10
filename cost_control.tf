@@ -452,19 +452,6 @@ resource "aws_iam_role_policy" "cost_report_permissions" {
       {
         Effect = "Allow"
         Action = [
-          "ce:GetCostAndUsage",
-          "ce:GetCostForecast"
-        ]
-        Resource = ["*"]
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["sns:Publish"]
-        Resource = [aws_sns_topic.cost_report.arn]
-      },
-      {
-        Effect = "Allow"
-        Action = [
           "cloudtrail:LookupEvents"
         ]
         Resource = ["*"]
