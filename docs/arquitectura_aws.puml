@@ -1,0 +1,149 @@
+@startuml Arquitectura Data Lake - Conectividad
+!define AWSPuml https://raw.githubusercontent.com/awslabs/aws-icons-for-plantuml/v18.0/dist
+
+!include AWSPuml/AWSCommon.puml
+!include AWSPuml/AWSSimplified.puml
+!include AWSPuml/General/Client.puml
+!include AWSPuml/General/Users.puml
+!include AWSPuml/NetworkingContentDelivery/DirectConnect.puml
+!include AWSPuml/NetworkingContentDelivery/VPCNATGateway.puml
+!include AWSPuml/NetworkingContentDelivery/TransitGateway.puml
+!include AWSPuml/NetworkingContentDelivery/ElasticLoadBalancing.puml
+!include AWSPuml/NetworkingContentDelivery/APIGateway.puml
+!include AWSPuml/Compute/Lambda.puml
+!include AWSPuml/Compute/EC2.puml
+!include AWSPuml/Containers/ElasticKubernetesService.puml
+!include AWSPuml/Storage/SimpleStorageService.puml
+!include AWSPuml/Analytics/Glue.puml
+!include AWSPuml/Analytics/Athena.puml
+!include AWSPuml/Analytics/Redshift.puml
+!include AWSPuml/Analytics/ManagedStreamingForApacheKafka.puml
+!include AWSPuml/Analytics/OpenSearchService.puml
+!include AWSPuml/Database/Neptune.puml
+!include AWSPuml/MachineLearning/SageMaker.puml
+!include AWSPuml/MachineLearning/Bedrock.puml
+!include AWSPuml/SecurityIdentityCompliance/KeyManagementService.puml
+!include AWSPuml/SecurityIdentityCompliance/WAF.puml
+!include AWSPuml/SecurityIdentityCompliance/GuardDuty.puml
+!include AWSPuml/ManagementGovernance/CloudWatch.puml
+!include AWSPuml/FrontEndWebMobile/Amplify.puml
+
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+
+title Arquitectura Data Lakehouse + Chatbot RAG\nBanco Nacional de Mexico - Region mx-central-1
+
+' === ON-PREMISE ===
+rectangle "🏢 ON-PREMISE - CDMX (Zona C)" as onprem #F5F5F5 {
+    Client(core, "Core Bancario", "Transacciones")
+    Client(sap, "SAP / ERP", "Operaciones")
+    Client(oracle, "Oracle DB", "Datos historicos")
+    Client(mainframe, "Mainframe", "Legacy")
+    Client(apis_int, "APIs Internas", "REST/SOAP")
+    Client(ldap, "LDAP / AD", "Autenticacion")
+}
+
+' === RVPX ===
+rectangle "🛡️ RVPX Proxy" as rvpx #FFF8E1 {
+    ElasticLoadBalancing(rvpx_gw, "Gateway", "mTLS + Rate Limit")
+}
+
+' === DIRECT CONNECT ===
+DirectConnect(dx, "Direct Connect", "1 Gbps Enlace Privado")
+
+' === AWS CLOUD ===
+rectangle "☁️ AWS Cloud - us-east-1 / mx-central-1" as aws #E3F2FD {
+
+    ' VPC
+    rectangle "VPC Privada" as vpc #E8F5E9 {
+        TransitGateway(tgw, "Transit Gateway", "Hub de red")
+        VPCNATGateway(nat, "NAT Gateway", "Salida internet")
+
+        ' LAKEHOUSE
+        rectangle "Data Lakehouse" as lakehouse #FFF3E0 {
+            SimpleStorageService(s3_bronze, "S3 Bronze", "Raw")
+            SimpleStorageService(s3_silver, "S3 Silver", "Curated")
+            SimpleStorageService(s3_gold, "S3 Gold", "Augmented")
+            Glue(glue, "Glue ETL", "Transformaciones")
+            Glue(catalog, "Glue Catalog", "Metadatos")
+            Athena(athena, "Athena", "SQL Ad-hoc")
+            Redshift(redshift, "Redshift", "Warehouse")
+            ManagedStreamingForApacheKafka(msk, "MSK Kafka", "Streaming")
+            Neptune(neptune, "Neptune", "Grafos")
+        }
+
+        ' CHATBOT
+        rectangle "Chatbot RAG" as chatbot #F3E5F5 {
+            SimpleStorageService(s3_docs, "S3 PDFs", "Documentos")
+            Bedrock(bedrock_kb, "Bedrock KB", "Knowledge Base")
+            OpenSearchService(opensearch, "OpenSearch", "Vectores")
+            Bedrock(claude, "Claude", "Generacion")
+            Lambda(lambda_chat, "Lambda /chat", "Chatbot")
+            APIGateway(apigw_chat, "API Gateway", "/chat endpoint")
+        }
+
+        ' SEGURIDAD
+        rectangle "Seguridad" as sec #FFEBEE {
+            KeyManagementService(kms, "KMS", "Encriptacion")
+            WAF(waf, "WAF", "Proteccion API")
+            GuardDuty(gd, "GuardDuty", "Amenazas")
+        }
+
+        ' OBSERVABILIDAD
+        CloudWatch(cw, "CloudWatch", "7 Dashboards + Alarmas")
+    }
+
+    ' ML
+    rectangle "IA / ML" as ml #E8EAF6 {
+        SageMaker(sm, "SageMaker Studio", "Training + Endpoints")
+        Bedrock(bedrock_fm, "Bedrock FM", "Claude, Titan, Llama")
+    }
+
+    ' SALIDAS
+    Amplify(amplify, "Amplify PWA", "Portal Costos")
+}
+
+' === CANALES EXTERNOS ===
+rectangle "📱 Canales" as canales #F5F5F5 {
+    Users(portal, "Portal Sucursales", "Empleados")
+    Users(slack, "Slack / Teams", "Corporativo")
+    Users(whatsapp, "WhatsApp", "Clientes")
+}
+
+' === CONEXIONES ===
+onprem -down-> rvpx : Trafico controlado
+rvpx -right-> dx : mTLS
+dx -right-> tgw : Enlace privado
+
+tgw --> s3_bronze : Ingesta datos
+tgw --> lambda_chat : Consultas API
+
+s3_bronze --> glue
+glue --> s3_silver
+glue --> s3_gold
+glue --> catalog
+catalog --> athena
+catalog --> redshift
+s3_gold --> bedrock_kb
+s3_gold --> sm
+msk --> s3_bronze
+
+s3_docs --> bedrock_kb
+bedrock_kb --> opensearch
+bedrock_kb --> claude
+claude --> lambda_chat
+lambda_chat --> apigw_chat
+apigw_chat --> amplify
+apigw_chat --> canales
+
+lambda_chat ..> apis_int : Consulta datos\nvia Direct Connect
+
+kms --> s3_bronze
+kms --> s3_silver
+kms --> s3_gold
+waf --> apigw_chat
+cw --> canales : Alertas
+
+sm --> bedrock_fm
+
+@enduml
